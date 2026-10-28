@@ -1,10 +1,22 @@
-# Command Queue: session/readiness foundation
+# Command Queue for Konsole
 
-This stage provides a bottom dock named **Command Queue** with session status.
-**Ctrl+Q** or **Plugins → Show Command Queue** toggles it. Closing it returns
-focus to the active terminal. There is no command editor, queue, input
-interception, or command execution. Optional shell-reporting hooks are supplied
-but are never installed or sourced automatically. Ctrl+Q is reserved by the action;
+**Ctrl+Q** or **Plugins → Show Command Queue** toggles the bottom panel.
+The list shows pending commands for the last focused terminal. Type a single-line
+command in the bottom textbox and press Enter to queue it. Commands run in order
+in that session, including while another tab or split is focused or the panel
+is hidden. Executed commands leave the list; their output stays in the terminal.
+The read-only debug textbox shows the session ID, readiness state and queue size.
+
+Up/Down in the textbox selects pending commands for editing; Enter saves,
+Escape cancels, and Down past the last item restores your draft. Double-clicking
+a list item also edits it. Dispatch for that session is held while editing.
+Select an item and click Delete to remove it. Each session retains its own draft
+and edit state when switching terminals. Queues are in memory and discarded
+when their session closes. There is no success condition yet.
+
+Optional shell hooks below must be sourced in each shell before automatic
+execution works. They are never installed or sourced automatically. Closing the
+panel returns focus to the active terminal. Ctrl+Q is reserved by the action;
 other terminal input retains Konsole's normal handling. The shortcut appears
 in Konsole's shortcut configuration as `Show Command Queue`.
 
@@ -27,22 +39,20 @@ focus to the panel keeps the last terminal selected. Switching tabs or split
 panes changes the displayed session; background observers continue receiving
 reports, and returning to a session shows its retained state. Trackers are
 removed when their session is destroyed. Status updates neither open the panel
-nor move focus. These objects are the future home for per-session queue state;
-no queue is implemented now.
+nor move focus. Each tracker owns a `SessionQueue`; dispatch is independent of
+the displayed session.
 
 The panel distinguishes unknown, prompt reported, input sent, running,
-continuation input, read-only, alternate-screen application, and closed states.
-An idle-looking terminal or finished foreground PID is not sufficient to infer
-readiness. Without shell reports, the status remains unknown.
+continuation input, read-only, and closed states. Without shell reports, queued
+commands wait. Dispatch requires a prompt report, a running writable session,
+the primary terminal screen, and no active queue edit. Input sent to the terminal
+invalidates the current prompt report without intercepting or modifying bytes.
 
-**Prompt reported is a readiness candidate, not permission to inject a command.**
-The tracker cannot inspect the Readline/ZLE editing buffer. It observes
-`Emulation::sendData` without intercepting or modifying bytes, invalidating the
-prompt report on input (including terminal replies). Prompt redisplay, input
-typed ahead during a running command, and asynchronous output still require
-an empty-buffer/dispatch handshake before automatic execution can be safe.
-No automatic dispatcher or `canDispatch` guarantee is supplied in this stage.
-Exit codes and command success are not tracked yet.
+This prototype assumes no leftover input in the shell's editing buffer. A prompt
+report dispatches immediately: there is no timer, buffer clearing, or readiness
+handshake. Readiness is consumed before sending one command, so another command
+waits for the next prompt report. Typed-ahead input is an accepted limitation
+for this version. Exit codes and command success are not tracked yet.
 
 ### Optional shell reports
 
@@ -95,6 +105,8 @@ sleep process rather than user shell startup files; normal user settings are
 not changed. Additional tests cover independent sessions, background updates,
 partial marker sequences, input forwarding, session cleanup, and interactive
 shell hooks. Hook tests use temporary homes and bypass user startup files.
+An end-to-end test uses real Bash sessions to check ordered background execution,
+shell variable persistence, independent queues/drafts, editing, and deletion.
 Uninstalled shells are explicitly skipped (Zsh is currently absent on the
 development machine; Bash integration is tested).
 

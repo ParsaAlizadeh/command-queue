@@ -20,6 +20,8 @@ public:
     int sessionId() const { return m_sessionId; }
     QString stateName() const;
     QString description() const;
+    bool promptReported() const;
+    void invalidatePrompt();
 
 Q_SIGNALS:
     void changed();

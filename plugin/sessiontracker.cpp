@@ -6,6 +6,7 @@
 SessionTracker::SessionTracker(Konsole::Session *session, QObject *parent)
     : QObject(parent), m_session(session), m_sessionId(session->sessionId())
 {
+    m_primaryScreen = session->isPrimaryScreen();
     auto *emulation = session->emulation();
     connect(emulation, &Konsole::Emulation::osc777Received, this, &SessionTracker::handleMarker);
     connect(emulation, &Konsole::Emulation::sendData, this, [this](const QByteArray &bytes) {
@@ -48,6 +49,17 @@ void SessionTracker::handleMarker(const QStringList &params)
     } else if (params[2] == QLatin1String("continuation")) {
         setState(State::Continuation);
     }
+}
+
+bool SessionTracker::promptReported() const
+{
+    return m_state == State::PromptReported && m_primaryScreen
+        && m_session && !m_session->isReadOnly();
+}
+
+void SessionTracker::invalidatePrompt()
+{
+    if (m_state != State::Closed) setState(State::InputPending);
 }
 
 QString SessionTracker::stateName() const

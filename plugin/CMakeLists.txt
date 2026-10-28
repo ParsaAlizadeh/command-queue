@@ -45,7 +45,7 @@ foreach(component konsoleapp konsoleprivate)
 endforeach()
 
 configure_file(commandqueue.json.in commandqueue.json @ONLY)
-add_library(konsole_commandqueue MODULE commandqueueplugin.cpp sessiontracker.cpp sessiontracker.h)
+add_library(konsole_commandqueue MODULE commandqueueplugin.cpp sessiontracker.cpp sessiontracker.h sessionqueue.cpp sessionqueue.h)
 target_include_directories(konsole_commandqueue PRIVATE
     "${KONSOLE_SOURCE_DIR}" "${KONSOLE_SOURCE_DIR}/src"
     "${KONSOLE_SOURCE_DIR}/src/terminalDisplay"

@@ -1,8 +1,8 @@
 # Command Queue for Konsole
 
 Plugin source lives in `plugin/`. The current prototype toggles a bottom panel
-that follows the focused terminal session and displays shell-readiness reports.
-It does not queue or execute commands yet. See [plugin/README.md](plugin/README.md)
+that follows the focused terminal session. Each session has its own command queue,
+which continues executing while the panel is hidden or another terminal is focused. See [plugin/README.md](plugin/README.md)
 for optional shell hooks, architecture, and discovery behavior.
 
 ## Development

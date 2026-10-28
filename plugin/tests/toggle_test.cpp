@@ -11,7 +11,10 @@
 #include <KPluginFactory>
 #include <KPluginMetaData>
 #include <QDockWidget>
-#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QPushButton>
+#include <QFile>
 #include <QProcess>
 #include <QSignalSpy>
 #include <QStandardPaths>
@@ -90,7 +93,7 @@ private Q_SLOTS:
         QTest::keyClick(terminal, Qt::Key_Q, Qt::ControlModifier);
         QTRY_VERIFY(dock->isVisible());
         QVERIFY(actions.first()->isChecked());
-        QTRY_VERIFY(dock->widget()->hasFocus());
+        QTRY_VERIFY((dock->widget()->hasFocus() || dock->widget()->isAncestorOf(QApplication::focusWidget())));
 
         // Layout visibility is not a user toggle and must not steal focus.
         terminal->setFocus();
@@ -108,7 +111,7 @@ private Q_SLOTS:
         QVERIFY(terminal->hasFocus());
 
         dock->widget()->setFocus();
-        QTRY_VERIFY(dock->widget()->hasFocus());
+        QTRY_VERIFY((dock->widget()->hasFocus() || dock->widget()->isAncestorOf(QApplication::focusWidget())));
         QTest::keyClick(dock->widget(), Qt::Key_Q, Qt::ControlModifier);
         QTRY_VERIFY(dock->isHidden());
         QVERIFY(!actions.first()->isChecked());
@@ -116,14 +119,14 @@ private Q_SLOTS:
 
         // Exercise both real split paths while the panel itself has focus.
         actions.first()->trigger();
-        QTRY_VERIFY(dock->widget()->hasFocus());
+        QTRY_VERIFY((dock->widget()->hasFocus() || dock->widget()->isAncestorOf(QApplication::focusWidget())));
         QVERIFY(QMetaObject::invokeMethod(window.viewManager(), "splitLeftRight", Qt::DirectConnection));
         QCoreApplication::processEvents();
         QCOMPARE(window.findChildren<Konsole::TerminalDisplay *>().size(), 2);
         QVERIFY(actions.first()->isChecked());
         QVERIFY(dock->isVisible());
         dock->widget()->setFocus();
-        QTRY_VERIFY(dock->widget()->hasFocus());
+        QTRY_VERIFY((dock->widget()->hasFocus() || dock->widget()->isAncestorOf(QApplication::focusWidget())));
         QVERIFY(QMetaObject::invokeMethod(window.viewManager(), "splitTopBottom", Qt::DirectConnection));
         QCoreApplication::processEvents();
         QCOMPARE(window.findChildren<Konsole::TerminalDisplay *>().size(), 3);
@@ -219,10 +222,10 @@ private Q_SLOTS:
         QTRY_COMPARE(contents->property("focusedSessionId").toInt(), second->sessionId());
         QCOMPARE(state(), QStringLiteral("unknown"));
         actions.first()->trigger();
-        QTRY_VERIFY(contents->hasFocus());
+        QTRY_VERIFY((contents->hasFocus() || contents->isAncestorOf(QApplication::focusWidget())));
         marker(second, "running");
         QCOMPARE(state(), QStringLiteral("running"));
-        QVERIFY(contents->hasFocus());
+        QVERIFY((contents->hasFocus() || contents->isAncestorOf(QApplication::focusWidget())));
         QVERIFY(dock->isVisible());
         marker(first, "continuation");
         QCOMPARE(state(), QStringLiteral("running"));
@@ -236,7 +239,7 @@ private Q_SLOTS:
 
         // Alternate-screen transitions cannot restore an old prompt report.
         second->emulation()->receiveData("\033[?1049h", 8);
-        QCOMPARE(state(), QStringLiteral("interactive-screen"));
+        QCOMPARE(state(), QStringLiteral("unknown"));
         second->emulation()->receiveData("\033[?1049l", 8);
         QCOMPARE(state(), QStringLiteral("unknown"));
         const QString trackerName = QStringLiteral("CommandQueueSessionTracker_%1").arg(second->sessionId());
@@ -244,6 +247,128 @@ private Q_SLOTS:
         QTRY_VERIFY(!plugin->findChild<QObject *>(trackerName));
         QTRY_COMPARE(contents->property("focusedSessionId").toInt(), first->sessionId());
         QCOMPARE(state(), QStringLiteral("continuation"));
+    }
+
+    void promptDispatch()
+    {
+        KPluginMetaData metadata;
+        for (const auto &candidate : KPluginMetaData::findPlugins(QStringLiteral("konsoleplugins"))) {
+            if (candidate.pluginId() == QStringLiteral("konsole_commandqueue")) metadata = candidate;
+        }
+        const auto result = KPluginFactory::instantiatePlugin<Konsole::IKonsolePlugin>(metadata);
+        QVERIFY2(result.plugin, qPrintable(result.errorString));
+        std::unique_ptr<Konsole::IKonsolePlugin> plugin(result.plugin);
+        Konsole::MainWindow window;
+        auto *session = window.createSession(testProfile(), QString());
+        plugin->createWidgetsForMainWindow(&window);
+        window.addPlugin(plugin.get());
+        const auto actions = plugin->menuBarActions(&window);
+        window.setPluginsActions(actions);
+        window.show();
+        window.activateWindow();
+        session->views().first()->setFocus();
+        actions.first()->trigger();
+        auto *input = window.findChild<QLineEdit *>(QStringLiteral("CommandQueueInput"));
+        auto *list = window.findChild<QListWidget *>(QStringLiteral("CommandQueueList"));
+        QTRY_VERIFY(session->isRunning());
+        QSignalSpy sent(session->emulation(), &Konsole::Emulation::sendData);
+        QTest::keyClicks(input, QStringLiteral("first"));
+        QTest::keyClick(input, Qt::Key_Return);
+        QTest::keyClicks(input, QStringLiteral("second"));
+        QTest::keyClick(input, Qt::Key_Return);
+        QCOMPARE(sent.size(), 0); // Unknown readiness never dispatches.
+        QCOMPARE(list->count(), 2);
+        QTest::keyClick(input, Qt::Key_Up);
+        const QByteArray prompt("\033]777;command-queue;1;prompt\a");
+        session->emulation()->receiveData(prompt.constData(), prompt.size());
+        QCOMPARE(sent.size(), 0); // Editing holds dispatch even at a prompt.
+        QTest::keyClick(input, Qt::Key_Escape);
+        QCOMPARE(sent.size(), 1); // Synchronous: no timer/event-loop wait.
+        QCOMPARE(sent.at(0).first().toByteArray(), QByteArray("first\r"));
+        QCOMPARE(list->count(), 1);
+        session->emulation()->receiveData(prompt.constData(), prompt.size());
+        QCOMPARE(sent.size(), 2);
+        QCOMPARE(sent.at(1).first().toByteArray(), QByteArray("second\r"));
+        QCOMPARE(list->count(), 0);
+    }
+
+    void backgroundQueue()
+    {
+        KPluginMetaData metadata;
+        for (const auto &candidate : KPluginMetaData::findPlugins(QStringLiteral("konsoleplugins"))) {
+            if (candidate.pluginId() == QStringLiteral("konsole_commandqueue")) metadata = candidate;
+        }
+        const auto result = KPluginFactory::instantiatePlugin<Konsole::IKonsolePlugin>(metadata);
+        QVERIFY2(result.plugin, qPrintable(result.errorString));
+        std::unique_ptr<Konsole::IKonsolePlugin> plugin(result.plugin);
+        QTemporaryDir temporary;
+        QVERIFY(temporary.isValid());
+        const QString rcPath = temporary.filePath(QStringLiteral("bashrc"));
+        QFile rc(rcPath);
+        QVERIFY(rc.open(QIODevice::WriteOnly));
+        rc.write("PS1='CQ> '; source '" PLUGIN_SOURCE_DIR "/shell/integration.bash'\n");
+        rc.close();
+        auto profile = testProfile();
+        profile->setProperty(Konsole::Profile::Command, QStringLiteral("/usr/bin/bash"));
+        profile->setProperty(Konsole::Profile::Arguments,
+            QStringList{QStringLiteral("/usr/bin/bash"), QStringLiteral("--noprofile"),
+                QStringLiteral("--rcfile"), rcPath, QStringLiteral("-i")});
+        Konsole::MainWindow window;
+        auto *first = window.createSession(profile, temporary.path());
+        plugin->createWidgetsForMainWindow(&window);
+        window.addPlugin(plugin.get());
+        const auto actions = plugin->menuBarActions(&window);
+        window.setPluginsActions(actions);
+        window.show();
+        window.activateWindow();
+        first->views().first()->setFocus();
+        auto *dock = window.findChild<QDockWidget *>(QStringLiteral("CommandQueueDock"));
+        auto *input = dock->findChild<QLineEdit *>(QStringLiteral("CommandQueueInput"));
+        auto *list = dock->findChild<QListWidget *>(QStringLiteral("CommandQueueList"));
+        auto *remove = dock->findChild<QPushButton *>(QStringLiteral("CommandQueueDelete"));
+        auto state = [dock] { return dock->widget()->property("readinessState").toString(); };
+        auto enqueue = [input](const QString &command) {
+            QTest::keyClicks(input, command);
+            QTest::keyClick(input, Qt::Key_Return);
+        };
+        QTRY_COMPARE(state(), QStringLiteral("prompt-reported"));
+        first->sendTextToTerminal(QStringLiteral("sleep 1"), QLatin1Char('\r'));
+        QTRY_COMPARE(state(), QStringLiteral("running"));
+        actions.first()->trigger();
+        enqueue(QStringLiteral("cq_value=first; printf '%s\\n' \"$cq_value\" > result"));
+        enqueue(QStringLiteral("printf '%s-second\\n' \"$cq_value\" >> result"));
+        QCOMPARE(list->count(), 2);
+        // Editing holds this session's dispatch until saved or cancelled.
+        QTest::keyClick(input, Qt::Key_Up);
+        QVERIFY(input->text().contains(QStringLiteral("second")));
+        input->selectAll();
+        QTest::keyClicks(input, QStringLiteral("printf '%s-edited\\n' \"$cq_value\" >> result"));
+        QTest::keyClick(input, Qt::Key_Return);
+        enqueue(QStringLiteral("echo unwanted"));
+        list->setCurrentRow(2);
+        remove->click();
+        QCOMPARE(list->count(), 2);
+        QTest::keyClicks(input, QStringLiteral("first draft"));
+        auto *second = window.createSession(profile, temporary.path());
+        second->views().first()->setFocus();
+        QTRY_COMPARE(dock->widget()->property("focusedSessionId").toInt(), second->sessionId());
+        QCOMPARE(list->count(), 0);
+        QCOMPARE(input->text(), QString());
+        QTRY_COMPARE(state(), QStringLiteral("prompt-reported"));
+        enqueue(QStringLiteral("printf 'other\\n' > other"));
+        // First session keeps executing while another tab owns the panel.
+        auto readFile = [](const QString &path) {
+            QFile file(path);
+            return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        };
+        QTRY_COMPARE_WITH_TIMEOUT(readFile(temporary.filePath(QStringLiteral("result"))),
+            QByteArray("first\nfirst-edited\n"), 5000);
+        QTRY_COMPARE(readFile(temporary.filePath(QStringLiteral("other"))), QByteArray("other\n"));
+        first->views().first()->setFocus();
+        QTRY_COMPARE(dock->widget()->property("focusedSessionId").toInt(), first->sessionId());
+        QCOMPARE(list->count(), 0);
+        QCOMPARE(input->text(), QStringLiteral("first draft"));
+        QTRY_COMPARE(state(), QStringLiteral("prompt-reported"));
     }
 
     void shellHooks_data()
