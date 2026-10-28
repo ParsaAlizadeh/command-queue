@@ -7,7 +7,7 @@ export KONSOLE_SOURCE_DIR="$CQ_ROOT/vendor/konsole"
 export KONSOLE_BINARY_DIR="$CQ_ROOT/build/konsole"
 export CQ_PLUGIN_BUILD_DIR="$CQ_ROOT/build/plugin"
 export CCACHE_DIR="$CQ_ROOT/build/ccache"
-export CQ_JOBS="${CQ_JOBS:-2}"
+export CQ_JOBS="${CQ_JOBS:-4}"
 export CQ_BUILD_TYPE="${CQ_BUILD_TYPE:-Debug}"
 export CQ_SYSTEM_KONSOLE="${CQ_SYSTEM_KONSOLE:-/usr/bin/konsole}"
 
