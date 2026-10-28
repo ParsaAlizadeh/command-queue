@@ -1,5 +1,5 @@
 {
     "pluginVersion": "@PROJECT_VERSION@",
     "konsoleVersion": "@KONSOLE_VERSION@",
-    "konsoleRevision": "@KONSOLE_REVISION@"
+    "konsoleSourceRPM": "@KONSOLE_SOURCE_RPM@"
 }

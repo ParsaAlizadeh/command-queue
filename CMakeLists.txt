@@ -46,6 +46,11 @@ include(KDEInstallDirs6)
 include(CTest)
 include(cmake/Konsole.cmake)
 add_subdirectory(plugin)
+if(BUILD_TESTING)
+    add_test(NAME fedora_recipe COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/recipe-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestKonsoleSpec.cmake")
+endif()
 
 install(FILES LICENSE DESTINATION "${KDE_INSTALL_DATADIR}/licenses/konsole-command-queue")
 option(CQ_BUILD_RPM "Enable CPack RPM generation for the installed Konsole package" OFF)

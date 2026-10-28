@@ -5,7 +5,6 @@ add_library(konsole_commandqueue MODULE commandqueueplugin.cpp sessiontracker.cp
 target_include_directories(konsole_commandqueue PRIVATE
     "${KONSOLE_SOURCE_DIR}" "${KONSOLE_SOURCE_DIR}/src"
     "${KONSOLE_SOURCE_DIR}/src/terminalDisplay"
-    "${KONSOLE_BINARY_DIR}/src/characters"
     "${KONSOLE_BINARY_DIR}" "${KONSOLE_BINARY_DIR}/src"
     "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(konsole_commandqueue PRIVATE
@@ -33,7 +32,7 @@ message(STATUS "Plugin search root: ${CMAKE_BINARY_DIR}/plugins")
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     add_executable(toggle_test tests/toggle_test.cpp)
-    target_compile_definitions(toggle_test PRIVATE EXPECTED_KONSOLE_VERSION="${KONSOLE_VERSION}" EXPECTED_PLUGIN_VERSION="${PROJECT_VERSION}")
+    target_compile_definitions(toggle_test PRIVATE EXPECTED_KONSOLE_VERSION="${KONSOLE_VERSION}" EXPECTED_PLUGIN_VERSION="${PROJECT_VERSION}" EXPECTED_KONSOLE_SOURCE_RPM="${KONSOLE_SOURCE_RPM}")
     target_compile_definitions(toggle_test PRIVATE PLUGIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_include_directories(toggle_test PRIVATE
         $<TARGET_PROPERTY:konsole_commandqueue,INCLUDE_DIRECTORIES>)

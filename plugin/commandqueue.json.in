@@ -1,7 +1,7 @@
 {
     "CommandQueueVersion": "@PROJECT_VERSION@",
     "KonsoleVersion": "@KONSOLE_VERSION@",
-    "KonsoleRevision": "@KONSOLE_REVISION@",
+    "KonsoleSourceRPM": "@KONSOLE_SOURCE_RPM@",
     "KPlugin": {
         "Id": "konsole_commandqueue",
         "Name": "Command Queue",

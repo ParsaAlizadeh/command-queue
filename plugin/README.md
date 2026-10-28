@@ -87,19 +87,19 @@ boundary or proof of an empty editor buffer.
 
 See the [project README](../README.md) for the standard CMake workflow,
 dependencies, compiler cache policy, installation paths, and versioning.
-The root CMake project fetches and builds the matching Konsole dependency;
+The root CMake project prepares headers from the matching Fedora source RPM;
 `plugin/` contains the plugin sources and is no longer a standalone CMake project.
 
 There is no public `find_package(Konsole)` SDK. The plugin includes original
-private headers from the fetched checkout and generated headers from its
-isolated build. It links to that build's `konsoleapp` and `konsoleprivate` while
-developing. Installation removes the development RPATH so the installed module
-uses the system's matching versioned libraries. Konsole is not installed by us.
+private headers from Fedora's patched source and generated headers from its
+configure step. It links to the installed `konsoleapp` and `konsoleprivate`
+libraries while developing and after installation. Konsole is never compiled
+or installed by us.
 
 Konsole discovers `konsoleplugins/konsole_commandqueue.so` through Qt's plugin
 search paths and loads it automatically. There is no separate enable checkbox;
 the Plugins menu action controls panel visibility. Konsole compares the first
 five characters of `KPlugin.Version` with its release version. Our build targets
-the full release and separately embeds the plugin's own version and dependency
-commit. Matching metadata is not proof of compatibility with downstream patches.
+the full release and separately embeds the plugin's own version and Fedora
+source-RPM identity. Matching metadata is not proof of compatibility with downstream patches.
 Restart Konsole after rebuilding or installing to load the new module.

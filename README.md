@@ -4,15 +4,13 @@ A Konsole plugin with a separate command queue for each terminal session.
 **Ctrl+Q** opens or closes the panel. Queues continue running in background
 sessions. See [plugin/README.md](plugin/README.md) for usage and shell integration.
 
-## Build and install
+## Fedora build and install
 
-Install Git, a C++17 compiler, CMake 3.24+, and the development dependencies for
-the matching Konsole release (Qt 6, KDE Frameworks 6, ICU, libssh and the other
-dependencies checked by Konsole's CMake). On Fedora, enabling source repositories
-and running `sudo dnf builddep konsole` supplies Konsole's build dependencies;
-Git and CMake must also be available. Other distributions need their equivalent
-build-dependency setup. CMake reports missing dependencies; it does not install
-them. Ninja is optional for the commands below.
+This project targets the installed Fedora Konsole and its matching Fedora source
+RPM. Install Konsole, CMake 3.24+, a C++17 compiler, `rpm-build`, and Konsole's build
+dependencies (`sudo dnf builddep konsole`). The build uses `dnf5`/`dnf`, `rpm`,
+`rpmbuild`, Fedora's KDE/CMake RPM macros, and Qt 6/KDE Frameworks 6
+development packages. It does not install dependencies automatically.
 
 ```bash
 cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr
@@ -21,39 +19,72 @@ ctest --test-dir build --output-on-failure
 sudo cmake --install build
 ```
 
-The first configure needs network access to KDE's Git repository. CMake reads
-`konsole --version` directly, fetches the exact `vX.Y.Z` release tag, and configures
-an isolated Konsole build. The normal build compiles its required libraries and
-our plugin. Dependency source and generated files stay under `build/_deps/`.
-There is no manual vendor checkout or separate configure/build procedure.
-Konsole itself, its libraries, and its other plugins are **not installed**.
+Ninja is optional for these commands. Normal builds compile only our plugin and
+tests. **Konsole itself and its libraries are never compiled or installed.**
 
-For explicit targeting, including future packaging environments where Konsole
-cannot run, pass `-DCQ_KONSOLE_VERSION=26.08.1`. Otherwise each configure detects
-the installed version again. After upgrading Konsole, rerun configure and build,
-then reinstall the plugin. Different releases use separate dependency directories.
-The resolved Git commit is recorded in metadata and `build-info.json`. Release
-tags select an exact release, but are not a cryptographic guarantee against an
-upstream tag being moved. Dependencies/toolchains must also match for reproducible
-binaries. Advanced/offline builds may supply an existing checkout with CMake's
-standard `FETCHCONTENT_SOURCE_DIR_KONSOLE_26_08_1` override.
+During configuration, CMake:
 
-The module installs to KDE's Qt plugin directory under `konsoleplugins/`;
-CMake prints the destination during installation. On Fedora with `/usr` as the
-prefix this is `/usr/lib64/qt6/plugins/konsoleplugins/`. Debian-family layouts
-can differ; KDEInstallDirs determines the platform layout. Restart Konsole to
-load it. A custom prefix may need its Qt plugin directory in `QT_PLUGIN_PATH`.
+1. Queries RPM ownership of the installed Konsole executable, taking version,
+   architecture and exact source-RPM identity from the installed RPM database.
+   It does not execute `konsole --version` or select a repository's newest build.
+2. Finds the installed versioned `libkonsoleapp` and `libkonsoleprivate` libraries
+   and verifies that their source RPM and architecture match Konsole's.
+3. Downloads that exact SRPM through `dnf download --srpm`, unless already cached.
+   It checks the cached RPM's identity and payload digests.
+4. Extracts the spec and source files. Fedora's `%prep` applies its patches.
+   Fedora's `%cmake_kf6` generates the real configuration and export headers;
+   `%cmake_build` is overridden to `:`, so compilation does not run. CMake can
+   still compile small compiler-detection probes during configuration.
+5. Creates imported targets for the installed libraries. The subsequent build
+   compiles our plugin against those headers and libraries.
 
-Shell integration installs to
-`<prefix>/share/konsole-command-queue/shell/`. Source the matching file from your
-shell startup configuration, after prompt setup, for example:
+The supported spec has `%prep` containing `%autosetup -p1`, and `%build`
+containing only `%cmake_kf6` followed by `%cmake_build`. Changed recipe shapes
+fail with an explanatory error rather than executing unexpected build steps.
+There is no separately maintained Konsole header generation or copied Fedora
+configure flag list. This follows the source and recipe; it does not recreate
+the historical Fedora buildroot, compiler or RPM macro versions exactly.
+
+The first configuration needs network access and the exact source package in
+enabled repositories. Missing or mismatched source packages cause a failure;
+there is no fallback to another release or upstream Git checkout. DNF runs
+noninteractively, without sudo or importing keys on the user's behalf. Repository
+configuration and trusted keys must already be usable.
+
+Source RPMs, extracted files, prepared sources, headers and logs live under:
+
+```text
+build/_deps/konsole-26.08.1-1.fc44.x86_64/
+```
+
+The exact directory follows the installed source package and architecture.
+`download.log` and `configure.log` contain detailed failure diagnostics. DNF's
+cache, state and logs live under `build/dnf/`. Repeat configurations reuse the
+cached SRPM and prepared source, then rerun Fedora's configure invocation without
+reapplying patches. After upgrading Konsole, rerun configure, build and install;
+a different SRPM gets its own directory. Unused old dependency directories can
+be deleted.
+
+`cmake --build build --target clean` (or `./dev.sh plugin_clean`) also removes
+**all** Konsole source RPMs and extracted/prepared/configured trees under
+`build/_deps/`, including old releases. The next configure downloads the required
+SRPM again. A normal build after clean automatically reruns configuration to
+regenerate missing headers. Compiler cache and DNF repository metadata are
+retained; removing `build/` resets those too.
+
+The plugin module is `build/plugins/konsoleplugins/konsole_commandqueue.so`.
+Installation places it in KDE's Qt plugin directory, normally
+`/usr/lib64/qt6/plugins/konsoleplugins/` with `/usr` as the prefix. Shell integration
+installs to `<prefix>/share/konsole-command-queue/shell/`. Source the matching file
+from your shell startup configuration, after prompt setup:
 
 ```bash
 source /usr/share/konsole-command-queue/shell/integration.bash
 ```
 
-Use `integration.zsh` for Zsh. Installation does not edit startup files or enable
-hooks automatically.
+Use `integration.zsh` for Zsh. Startup files are not edited automatically. Restart
+Konsole to load a newly installed plugin. A custom prefix may require its Qt
+plugin directory in `QT_PLUGIN_PATH`.
 
 To inspect installation without modifying the system:
 
@@ -61,52 +92,40 @@ To inspect installation without modifying the system:
 DESTDIR="$PWD/build/stage" cmake --install build
 ```
 
-Only the plugin, the two shell integration files, build information, and the
-license should appear in that staging tree. Installed modules have no development
-RPATH and resolve Konsole's versioned libraries from the system. An upstream release match
-cannot guarantee compatibility with distribution patches: rebuild and test for
-each target distribution. No public/stable Konsole plugin ABI is available.
+The staging tree contains the plugin, two integration files, build information
+and license. Installed modules have no development RPATH. This uses Konsole's
+private C++ interface; the matching Fedora source is preferable to unpatched
+upstream headers, but private ABI compatibility still needs testing.
 
 ## Compiler cache
 
 CMake optionally uses ccache when found (`CQ_USE_CCACHE=ON`, the default); it is
-not a required dependency. All compilation uses `<build-directory>/ccache`,
-including the isolated Konsole build and configurations made without `dev.sh`.
-The compiler launchers set `CCACHE_DIR` and `CCACHE_TEMPDIR` explicitly, overriding
-inherited locations. Configure subprocesses receive the same locations, covering
-Fedora's compiler symlinks to ccache. Nothing relies on an exported shell variable
-surviving from configure to build. No cache files are installed.
-
-Use `-DCQ_USE_CCACHE=OFF` to disable it, including implicit compiler wrappers.
-Removing the build directory removes the cache as well. `CQ_KONSOLE_JOBS` controls
-parallelism in the isolated dependency build (default 2); the outer build's
-`--parallel` setting controls plugin compilation.
+not required. Plugin compilation uses `<build-directory>/ccache`. The compiler
+launchers explicitly set `CCACHE_DIR` and `CCACHE_TEMPDIR`, so invoking CMake
+without `dev.sh` works identically. Fedora header-configuration subprocesses
+inherit the same paths, including compiler probes using Fedora's ccache wrappers.
+No cache files are installed. Use `-DCQ_USE_CCACHE=OFF` to disable caching,
+including implicit compiler wrappers. Removing the build directory removes it.
 
 ## Versions
 
 The plugin's own version is `project(... VERSION ...)` in the root CMake file,
-currently **0.1.0**. Target Konsole version and fetched Git commit are separate.
-Embedded JSON contains `CommandQueueVersion`, `KonsoleVersion`, and
-`KonsoleRevision`; the installed `build-info.json` records the same information.
-`KPlugin.Version` must contain the Konsole version because the host uses that
-field for compatibility filtering. It is not our feature version.
+currently **0.1.0**. Embedded JSON contains `CommandQueueVersion`, `KonsoleVersion`
+and `KonsoleSourceRPM`; installed `build-info.json` records the same information.
+The full SRPM identity records which Fedora patches and recipe supplied the
+headers. There is no Git checkout or Git revision in the metadata.
 
-RPM packages use a combined version such as `0.1.0+konsole26.08.1`.
-Their release, for example `2.fc44`, contains our packaging revision
-(`CQ_RPM_RELEASE`, default 2) and the build distribution's standard RPM dist tag.
-Konsole's RPM release is not included. A `-1.fc44` to `-2.fc44` Konsole rebuild
-does not change our package identity or require rebuilding the plugin merely
-because that release number changed. Plugin functionality changes still bump the
-project's own version. The compatibility metadata is separate from RPM dependencies.
-Revision 2 sorts above the previous `1.konsole...` naming scheme. If reusing an
-older build directory, pass `-DCQ_RPM_RELEASE=2` once to update its cached revision.
+`KPlugin.Version` contains the upstream Konsole version because the host uses
+that field for compatibility filtering. It is not our feature version.
+RPM packages use a combined version such as `0.1.0+konsole26.08.1` with release
+`2.fc44`: our packaging revision (`CQ_RPM_RELEASE`, default 2) and RPM's dist tag.
+Konsole's RPM release is not included. Revision 2 sorts above the previous
+`1.konsole...` naming; when reusing an older build directory, pass
+`-DCQ_RPM_RELEASE=2` once to update its cached revision.
 
 ## RPM packages
 
-RPM generation is optional and requires `rpm`, `rpmbuild` (Fedora's `rpm-build`
-package), and an installed, RPM-managed Konsole. Only native RPM builds are
-supported; DEB generation is not configured. Normal source builds do not need
-RPM tools. Configure packaging with the system prefix:
+Enable CPack RPM generation with the system prefix:
 
 ```bash
 cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr -DCQ_BUILD_RPM=ON
@@ -115,41 +134,26 @@ ctest --test-dir build --output-on-failure
 cmake --build build --target package
 ```
 
-After building, `cpack --config build/CPackConfig.cmake -G RPM` can also generate
-the package. Output is under `build/packages/`; packaging does not install it.
-The RPM contains the plugin, shell integration scripts, build information, and
-license. RPM may additionally generate standard build-ID links. Neither Konsole
-itself nor compiler caches are bundled. Shell activation remains explicit.
+After building, `cpack --config build/CPackConfig.cmake -G RPM` also generates it.
+The unsigned RPM appears under `build/packages/`; it is not installed. It includes
+our files, not Konsole or compiler caches. RPM may add standard build-ID links.
+DEB generation and cross-compilation are not supported.
 
-CMake queries the **installed RPM owning the selected Konsole executable** to
-obtain its name, epoch, upstream version and architecture. For example:
-`konsole(x86-64) = 0:26.08.1`. Omitting the release accepts any RPM release of
-that upstream version. This dependency is added alongside
-RPM's automatic library requirements. `konsole --version` still selects the
-upstream checkout; packaging fails if that version differs from the installed
-RPM. CPack checks the installed package again before packaging and refuses a
-stale configuration if the upstream version, epoch, package name or architecture
-has changed. A distribution release-only change is accepted. The generated RPM
-is unsigned.
+The explicit requirement is, for example, `konsole(x86-64) = 0:26.08.1`, accepting
+any RPM release of that upstream version. Automatic library requirements are
+also included. CPack rechecks the installed Konsole version/epoch/architecture
+before packaging; release-only changes remain accepted. This package policy is
+separate from choosing the exact installed SRPM when generating headers.
 
-An upstream-version change can prevent a Konsole upgrade while this plugin is
-installed. Depending on DNF's solver options, it may fail or retain the older
-Konsole package. `--allowerasing` allows dependency-related removals, including
-the plugin when needed; it may also propose removing other packages. Review the
-transaction. No automatic removal or upgrade workaround is implemented.
-
-Konsole's metadata filter compares major/minor only, while its private libraries
-are versioned with the full upstream version. Automatic RPM library requirements
-therefore also constrain upgrades; deleting just our explicit dependency would
-not remove that constraint. Accepting distribution rebuilds assumes their patches
-preserve the ABI used by the plugin, which is not guaranteed by Konsole's private
-API. DNF does not automatically rebuild the plugin on upgrades; that would need
-separate build automation or a repository publishing matching binary packages.
+A newer upstream Konsole may be blocked by the plugin's dependencies. DNF may
+fail or hold Konsole back, depending on solver options. `--allowerasing` permits
+dependency-related removals, including the plugin, but can also propose others.
+Distribution-only rebuilds are accepted on the assumption that they preserve the
+private ABI. No automatic erasure or rebuild-on-upgrade mechanism is provided.
 
 ## Development
 
-`dev.sh` is an optional convenience wrapper. It can be executed or sourced;
-users building/installing the plugin do not need it.
+`dev.sh` is an optional wrapper; end users need only CMake.
 
 ```bash
 ./dev.sh dev_build
@@ -157,24 +161,22 @@ users building/installing the plugin do not need it.
 ./dev.sh plugin_stage
 ./dev.sh plugin_rpm
 ./dev.sh run_konsole
-./dev.sh run_system_konsole
 ```
 
 Development defaults to Ninja, Debug, tests enabled, `/usr` as the intended
-installation prefix, and four parallel jobs. No development function installs
-system-wide. `plugin_stage` uses `DESTDIR=build/stage`. `run_konsole` builds the
-optional `konsole_host` target and launches that private host with the plugin;
-`run_system_konsole` uses the installed host. `plugin_rpm` enables RPM packaging,
-builds the project, and invokes CPack; additional arguments go to CPack. Both use `--separate` and set
-`QT_PLUGIN_PATH` for the build-tree plugin. The binary is
-`build/plugins/konsoleplugins/konsole_commandqueue.so`.
+installation prefix, and four parallel jobs. No function installs system-wide.
+`plugin_stage` uses `DESTDIR=build/stage`. `run_konsole` launches the installed
+host with `--separate` and sets `QT_PLUGIN_PATH` for our build-tree module.
 
 Override `CQ_BUILD_DIR`, `CQ_JOBS`, `CQ_BUILD_TYPE`, or `CQ_SYSTEM_KONSOLE` in the
-environment. Configure/build/test/stage/run functions accept additional arguments
-for the underlying commands. `./dev.sh` lists available functions.
+environment. Configure/build/test/stage/run functions forward additional arguments.
+`plugin_rpm` configures packaging and builds, then forwards its arguments to CPack.
+`plugin_clean` removes build outputs and the complete Konsole source cache.
+`./dev.sh` lists available functions.
 
-The tests load the actual compiled plugin and exercise the real Konsole main
-window, focus and splitting regressions, per-session readiness, editing/deletion,
-and ordered background execution in Bash. They use isolated XDG settings and
-temporary shell startup files. Unavailable shells are skipped. Use
-`-DBUILD_TESTING=OFF` when tests and the Qt Test development dependency are unwanted.
+Tests exercise the actual module against Fedora's installed Konsole libraries:
+focus and splitting regressions, per-session readiness, editing/deletion, and
+ordered background execution in Bash. They use isolated XDG settings and temporary
+shell startup files; unavailable shells are skipped. Recipe tests reject direct
+compilation or unexpected preparation/configuration stages. Use
+`-DBUILD_TESTING=OFF` to omit tests and the Qt Test development dependency.

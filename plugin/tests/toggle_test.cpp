@@ -69,7 +69,7 @@ private Q_SLOTS:
         QCOMPARE(metadata.version(), QStringLiteral(EXPECTED_KONSOLE_VERSION));
         QCOMPARE(metadata.rawData().value(QStringLiteral("CommandQueueVersion")).toString(), QStringLiteral(EXPECTED_PLUGIN_VERSION));
         QCOMPARE(metadata.rawData().value(QStringLiteral("KonsoleVersion")).toString(), QStringLiteral(EXPECTED_KONSOLE_VERSION));
-        QCOMPARE(metadata.rawData().value(QStringLiteral("KonsoleRevision")).toString().size(), 40);
+        QCOMPARE(metadata.rawData().value(QStringLiteral("KonsoleSourceRPM")).toString(), QStringLiteral(EXPECTED_KONSOLE_SOURCE_RPM));
         const auto result = KPluginFactory::instantiatePlugin<Konsole::IKonsolePlugin>(metadata);
         QVERIFY2(result.plugin, qPrintable(result.errorString));
         std::unique_ptr<Konsole::IKonsolePlugin> plugin(result.plugin);

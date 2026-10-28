@@ -11,14 +11,14 @@ dev_help() {
 Usage: ./dev.sh FUNCTION [arguments...]
        source ./dev.sh
 
-plugin_configure   Configure the project and fetch matching Konsole sources
-plugin_build       Build required Konsole libraries and the plugin
+plugin_configure   Configure the project and prepare matching Fedora source RPM headers
+plugin_build       Build the plugin and tests
+plugin_clean       Clean outputs and all cached Konsole SRPM/prepared trees
 plugin_test        Run tests in isolated project-local settings
 plugin_stage       Install into build/stage for inspection (no system changes)
 plugin_rpm         Configure, build, and generate an RPM under build/packages
 dev_build          Configure and build
-run_konsole        Build/run the private host with the plugin (--separate)
-run_system_konsole Run the installed host with the build-tree plugin (--separate)
+run_konsole        Run installed Konsole with the build-tree plugin (--separate)
 
 Extra arguments go to CMake/CTest/Konsole. CQ_BUILD_DIR, CQ_JOBS (4),
 CQ_BUILD_TYPE (Debug), and CQ_SYSTEM_KONSOLE can be overridden.
@@ -28,11 +28,14 @@ HELP
 
 plugin_configure() {
     cmake -S "$CQ_ROOT" -B "$CQ_BUILD_DIR" -G Ninja \
-        -DCMAKE_BUILD_TYPE="$CQ_BUILD_TYPE" -DBUILD_TESTING=ON -DCQ_KONSOLE_JOBS="$CQ_JOBS" \
+        -DCMAKE_BUILD_TYPE="$CQ_BUILD_TYPE" -DBUILD_TESTING=ON \
         -DCMAKE_INSTALL_PREFIX=/usr -DCQ_KONSOLE_EXECUTABLE="$CQ_SYSTEM_KONSOLE" "$@"
 }
 plugin_build() {
     CMAKE_BUILD_PARALLEL_LEVEL="$CQ_JOBS" cmake --build "$CQ_BUILD_DIR" --parallel "$CQ_JOBS" "$@"
+}
+plugin_clean() {
+    plugin_build --target clean "$@"
 }
 plugin_test() {
     ctest --test-dir "$CQ_BUILD_DIR" --output-on-failure "$@"
@@ -48,13 +51,6 @@ dev_build() {
     plugin_configure && plugin_build
 }
 run_konsole() {
-    local KONSOLE_SOURCE_DIR KONSOLE_BINARY_DIR
-    source "$CQ_BUILD_DIR/konsole-paths.sh" || return
-    plugin_build --target konsole_host || return
-    QT_PLUGIN_PATH="$CQ_BUILD_DIR/plugins:$KONSOLE_BINARY_DIR/bin${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}" \
-        "$KONSOLE_BINARY_DIR/bin/konsole" --separate "$@"
-}
-run_system_konsole() {
     QT_PLUGIN_PATH="$CQ_BUILD_DIR/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}" \
         "$CQ_SYSTEM_KONSOLE" --separate "$@"
 }

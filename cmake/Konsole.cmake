@@ -1,89 +1,130 @@
-include(FetchContent)
-include(ExternalProject)
+# This project targets the installed Fedora Konsole, not an upstream Git build.
+if(CMAKE_CROSSCOMPILING)
+    message(FATAL_ERROR "Only native Fedora builds are supported.")
+endif()
+file(STRINGS /etc/os-release fedora_id REGEX "^ID=(fedora|\"fedora\")$")
+if(NOT fedora_id)
+    message(FATAL_ERROR "This build requires Fedora's installed Konsole and source RPM.")
+endif()
+find_program(RPM_EXECUTABLE rpm REQUIRED)
+find_program(DNF_EXECUTABLE NAMES dnf5 dnf REQUIRED)
+find_program(RPMBUILD_EXECUTABLE rpmbuild REQUIRED)
+find_program(CQ_KONSOLE_EXECUTABLE konsole REQUIRED)
+include("${CMAKE_CURRENT_LIST_DIR}/QueryKonsoleRPM.cmake")
+cq_query_konsole_rpm("${RPM_EXECUTABLE}" "${CQ_KONSOLE_EXECUTABLE}" installed_konsole)
+set(KONSOLE_VERSION "${installed_konsole_VERSION}")
+set(KONSOLE_SOURCE_RPM "${installed_konsole_SOURCE_RPM}")
+if(NOT KONSOLE_SOURCE_RPM MATCHES "^[A-Za-z0-9_.+~-]+\\.src\\.rpm$")
+    message(FATAL_ERROR "Unexpected source RPM identity: ${KONSOLE_SOURCE_RPM}")
+endif()
 
-set(CQ_KONSOLE_VERSION "" CACHE STRING "Exact Konsole release (empty: detect installed Konsole)")
-find_program(CQ_KONSOLE_EXECUTABLE konsole DOC "Installed Konsole executable")
-if(CQ_KONSOLE_VERSION)
-    set(KONSOLE_VERSION "${CQ_KONSOLE_VERSION}")
-elseif(CQ_KONSOLE_EXECUTABLE)
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env QT_QPA_PLATFORM=offscreen
-        "${CQ_KONSOLE_EXECUTABLE}" --version
-        OUTPUT_VARIABLE version_output RESULT_VARIABLE version_result OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(NOT version_result EQUAL 0 OR NOT version_output MATCHES "konsole ([0-9]+\\.[0-9]+\\.[0-9]+)")
-        message(FATAL_ERROR "Cannot determine Konsole version: ${version_output}")
+# Use complete versioned filenames; Fedora does not ship the unversioned
+# development symlinks. Re-search each configure, including after an upgrade.
+foreach(component konsoleapp konsoleprivate)
+    unset(${component}_LIBRARY CACHE)
+    find_library(${component}_LIBRARY
+        NAMES "lib${component}.so.${KONSOLE_VERSION}" REQUIRED NO_CACHE)
+    cq_query_konsole_rpm("${RPM_EXECUTABLE}" "${${component}_LIBRARY}" owner)
+    if(NOT owner_SOURCE_RPM STREQUAL KONSOLE_SOURCE_RPM OR NOT owner_ARCH STREQUAL installed_konsole_ARCH)
+        message(FATAL_ERROR "${component} and Konsole must come from the same Fedora source RPM and architecture.")
     endif()
-    set(KONSOLE_VERSION "${CMAKE_MATCH_1}")
-else()
-    message(FATAL_ERROR "Install Konsole, or specify -DCQ_KONSOLE_VERSION=X.Y.Z for a packaging build.")
-endif()
-if(NOT KONSOLE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
-    message(FATAL_ERROR "CQ_KONSOLE_VERSION must be an exact release, e.g. 26.08.1.")
-endif()
-
-# Fetch only: Konsole expects to be its own top-level CMake project.
-# A versioned content name keeps different releases' source/build trees apart.
-string(REPLACE "." "_" content_name "konsole_${KONSOLE_VERSION}")
-FetchContent_Declare(${content_name}
-    GIT_REPOSITORY https://invent.kde.org/utilities/konsole.git
-    GIT_TAG "v${KONSOLE_VERSION}"
-    GIT_SHALLOW TRUE
-    UPDATE_DISCONNECTED TRUE
-    GIT_SUBMODULES ""
-    SOURCE_SUBDIR command-queue-fetch-only)
-FetchContent_MakeAvailable(${content_name})
-set(KONSOLE_SOURCE_DIR "${${content_name}_SOURCE_DIR}")
-set(KONSOLE_BINARY_DIR "${${content_name}_BINARY_DIR}")
-find_package(Git REQUIRED)
-execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${KONSOLE_SOURCE_DIR}" rev-parse HEAD
-    OUTPUT_VARIABLE KONSOLE_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
-
-# Generate the private headers at configure time. Compilation is a normal
-# dependency of the plugin; Konsole's install rules are never included in ours.
-execute_process(COMMAND "${CMAKE_COMMAND}"
-    -S "${KONSOLE_SOURCE_DIR}" -B "${KONSOLE_BINARY_DIR}" -G "${CMAKE_GENERATOR}"
-    "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
-    "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-    "-DCMAKE_C_COMPILER_LAUNCHER=${CMAKE_C_COMPILER_LAUNCHER}"
-    "-DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}"
-    "-DCMAKE_INSTALL_PREFIX=${KONSOLE_BINARY_DIR}/install"
-    -DBUILD_TESTING=OFF -DENABLE_PLUGIN_SSHMANAGER=OFF -DENABLE_PLUGIN_QUICKCOMMANDS=OFF
-    -DKDE_SKIP_UNINSTALL_TARGET=ON
-    COMMAND_ERROR_IS_FATAL ANY)
-load_cache("${KONSOLE_BINARY_DIR}" READ_WITH_PREFIX HOST_ CMAKE_PROJECT_VERSION)
-if(NOT HOST_CMAKE_PROJECT_VERSION STREQUAL KONSOLE_VERSION)
-    message(FATAL_ERROR "Fetched Konsole version ${HOST_CMAKE_PROJECT_VERSION} differs from ${KONSOLE_VERSION}.")
-endif()
-
-# Bound the isolated build even when an outer Ninja build uses its own defaults.
-set(CQ_KONSOLE_JOBS 2 CACHE STRING "Parallel jobs for the isolated Konsole build")
-if(NOT CQ_KONSOLE_JOBS MATCHES "^[1-9][0-9]*$")
-    message(FATAL_ERROR "CQ_KONSOLE_JOBS must be a positive integer.")
-endif()
-set(konsole_libraries)
-foreach(component konsoleapp konsoleprivate)
-    set(library "${KONSOLE_BINARY_DIR}/bin/${CMAKE_SHARED_LIBRARY_PREFIX}${component}${CMAKE_SHARED_LIBRARY_SUFFIX}.${KONSOLE_VERSION}")
-    list(APPEND konsole_libraries "${library}")
     add_library(Konsole::${component} SHARED IMPORTED GLOBAL)
-    set_target_properties(Konsole::${component} PROPERTIES IMPORTED_LOCATION "${library}")
+    set_target_properties(Konsole::${component} PROPERTIES IMPORTED_LOCATION "${${component}_LIBRARY}")
 endforeach()
-ExternalProject_Add(konsole_dependency
-    SOURCE_DIR "${KONSOLE_SOURCE_DIR}"
-    BINARY_DIR "${KONSOLE_BINARY_DIR}"
-    DOWNLOAD_COMMAND "" UPDATE_COMMAND "" PATCH_COMMAND "" CONFIGURE_COMMAND ""
-    BUILD_COMMAND "${CMAKE_COMMAND}" --build "${KONSOLE_BINARY_DIR}" --target konsoleapp --parallel "${CQ_KONSOLE_JOBS}"
-    BUILD_ALWAYS TRUE
-    BUILD_BYPRODUCTS ${konsole_libraries}
-    INSTALL_COMMAND ""
-    USES_TERMINAL_BUILD TRUE)
-foreach(component konsoleapp konsoleprivate)
-    add_dependencies(Konsole::${component} konsole_dependency)
+
+string(REGEX REPLACE "\\.src\\.rpm$" "" source_nvr "${KONSOLE_SOURCE_RPM}")
+set(work "${CMAKE_BINARY_DIR}/_deps/${source_nvr}.${installed_konsole_ARCH}")
+set(archive "${work}/${KONSOLE_SOURCE_RPM}")
+file(MAKE_DIRECTORY "${work}")
+if(NOT EXISTS "${archive}")
+    message(STATUS "Downloading installed Konsole source: ${KONSOLE_SOURCE_RPM}")
+    execute_process(COMMAND "${DNF_EXECUTABLE}" --assumeno
+        "--setopt=cachedir=${CMAKE_BINARY_DIR}/dnf/cache"
+        "--setopt=persistdir=${CMAKE_BINARY_DIR}/dnf/state"
+        "--setopt=logdir=${CMAKE_BINARY_DIR}/dnf/log"
+        download --srpm "--destdir=${work}" "${installed_konsole_NEVRA}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE download_log ERROR_VARIABLE download_error)
+    file(WRITE "${work}/download.log" "${download_log}\n${download_error}")
+    if(NOT result EQUAL 0 OR NOT EXISTS "${archive}")
+        file(REMOVE "${archive}")
+        message(FATAL_ERROR "Cannot download ${KONSOLE_SOURCE_RPM}. See ${work}/download.log. The exact installed source package must be available in enabled repositories.")
+    endif()
+endif()
+execute_process(COMMAND "${RPM_EXECUTABLE}" --checksig --nosignature "${archive}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE digest_log ERROR_VARIABLE digest_error)
+if(NOT result EQUAL 0)
+    file(REMOVE "${archive}")
+    message(FATAL_ERROR "Incomplete or corrupt source RPM cache removed. Reconfigure to download it again: ${digest_log}${digest_error}")
+endif()
+execute_process(COMMAND "${RPM_EXECUTABLE}" -qp --queryformat
+    "%{NAME}-%{VERSION}-%{RELEASE}.src.rpm|%{SOURCEPACKAGE}" "${archive}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE identity OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT result EQUAL 0 OR NOT identity STREQUAL "${KONSOLE_SOURCE_RPM}|1")
+    message(FATAL_ERROR "Downloaded RPM does not match ${KONSOLE_SOURCE_RPM}: ${identity}")
+endif()
+
+set(rpm_top "${work}/rpm")
+set(sources "${rpm_top}/SOURCES")
+file(MAKE_DIRECTORY "${sources}" "${rpm_top}/tmp")
+file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${sources}")
+file(GLOB specs "${sources}/*.spec")
+list(LENGTH specs spec_count)
+if(NOT spec_count EQUAL 1)
+    message(FATAL_ERROR "Expected exactly one spec in ${KONSOLE_SOURCE_RPM}.")
+endif()
+list(GET specs 0 spec)
+include("${CMAKE_CURRENT_LIST_DIR}/ValidateKonsoleSpec.cmake")
+cq_validate_konsole_spec("${spec}")
+
+# Fedora's spec configures in %build, followed by %cmake_build. Preserve its
+# real preparation, patches, macros and configure flags, replacing compilation
+# with a no-op. Later configures reuse the prepared tree via --short-circuit.
+file(SHA256 "${archive}" source_hash)
+set(short_circuit)
+if(EXISTS "${work}/prepared.sha256")
+    file(READ "${work}/prepared.sha256" previous_hash)
+    if(previous_hash STREQUAL source_hash)
+        set(short_circuit --short-circuit)
+    endif()
+endif()
+message(STATUS "Configuring Fedora Konsole headers (no Konsole compilation)")
+execute_process(COMMAND "${RPMBUILD_EXECUTABLE}" -bc ${short_circuit}
+    --define "_topdir ${rpm_top}" --define "_tmppath ${rpm_top}/tmp"
+    --define "cmake_build :" "${spec}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE configure_log ERROR_VARIABLE configure_error)
+file(WRITE "${work}/configure.log" "${configure_log}\n${configure_error}")
+if(NOT result EQUAL 0)
+    file(REMOVE "${work}/prepared.sha256")
+    message(FATAL_ERROR "Fedora Konsole header configuration failed. See ${work}/configure.log for missing build dependencies or configuration errors.")
+endif()
+
+file(GLOB_RECURSE caches "${rpm_top}/BUILD/CMakeCache.txt")
+set(KONSOLE_BINARY_DIR "")
+foreach(cache IN LISTS caches)
+    file(STRINGS "${cache}" is_konsole REGEX "^CMAKE_PROJECT_NAME:STATIC=konsole$")
+    if(is_konsole)
+        if(KONSOLE_BINARY_DIR)
+            message(FATAL_ERROR "Multiple Konsole configurations found under ${rpm_top}/BUILD.")
+        endif()
+        get_filename_component(KONSOLE_BINARY_DIR "${cache}" DIRECTORY)
+    endif()
 endforeach()
-# Optional development host. The default build only needs the libraries.
-add_custom_target(konsole_host
-    COMMAND "${CMAKE_COMMAND}" --build "${KONSOLE_BINARY_DIR}" --target konsole --parallel "${CQ_KONSOLE_JOBS}"
-    DEPENDS konsole_dependency USES_TERMINAL)
-string(REPLACE "'" "'\\''" shell_source_dir "${KONSOLE_SOURCE_DIR}")
-string(REPLACE "'" "'\\''" shell_binary_dir "${KONSOLE_BINARY_DIR}")
-file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/konsole-paths.sh" CONTENT
-    "export KONSOLE_SOURCE_DIR='${shell_source_dir}'\nexport KONSOLE_BINARY_DIR='${shell_binary_dir}'\n")
-message(STATUS "Command Queue ${PROJECT_VERSION}, Konsole ${KONSOLE_VERSION} (${KONSOLE_REVISION})")
+if(NOT KONSOLE_BINARY_DIR)
+    message(FATAL_ERROR "Fedora configure did not produce a Konsole CMake cache.")
+endif()
+load_cache("${KONSOLE_BINARY_DIR}" READ_WITH_PREFIX FEDORA_ CMAKE_HOME_DIRECTORY CMAKE_PROJECT_VERSION)
+set(KONSOLE_SOURCE_DIR "${FEDORA_CMAKE_HOME_DIRECTORY}")
+if(NOT FEDORA_CMAKE_PROJECT_VERSION STREQUAL KONSOLE_VERSION)
+    message(FATAL_ERROR "Configured source version does not match installed Konsole ${KONSOLE_VERSION}.")
+endif()
+foreach(header config-konsole.h konsoleapp_export.h konsoleprivate_export.h)
+    if(NOT EXISTS "${KONSOLE_BINARY_DIR}/src/${header}")
+        message(FATAL_ERROR "Fedora configure did not generate ${header}.")
+    endif()
+endforeach()
+file(WRITE "${work}/prepared.sha256" "${source_hash}")
+# Clean every cached release, not just the active one. Track the preparation
+# marker so the next build automatically reconfigures after clean removes it.
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${CMAKE_BINARY_DIR}/_deps")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${work}/prepared.sha256")
+message(STATUS "Command Queue ${PROJECT_VERSION}; Fedora source ${KONSOLE_SOURCE_RPM}")
