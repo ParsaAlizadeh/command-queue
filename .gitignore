@@ -1,0 +1,16 @@
+# External sources and local build products
+/vendor/
+/build/
+/work/
+
+# Host/agent metadata; not project source
+/.agents/
+/.aws/
+/.codex/
+
+# Crashes and editor-local files
+/core
+/core.*
+*.user
+*.swp
+*~
