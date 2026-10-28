@@ -1,7 +1,7 @@
 if(NOT CMAKE_INSTALL_PREFIX STREQUAL "/usr")
     message(FATAL_ERROR "RPM generation requires -DCMAKE_INSTALL_PREFIX=/usr.")
 endif()
-set(CQ_RPM_RELEASE 3 CACHE STRING "Plugin RPM packaging revision")
+set(CQ_RPM_RELEASE 1 CACHE STRING "Plugin RPM packaging revision")
 if(NOT CQ_RPM_RELEASE MATCHES "^[1-9][0-9]*$")
     message(FATAL_ERROR "CQ_RPM_RELEASE must be a positive integer.")
 endif()
