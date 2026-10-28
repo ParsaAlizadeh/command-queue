@@ -4,6 +4,7 @@
 #include "ViewManager.h"
 #include "pluginsystem/IKonsolePlugin.h"
 #include "session/SessionController.h"
+#include "sessiontracker.h"
 
 #include <KActionCollection>
 #include <KConfigGroup>
@@ -11,9 +12,11 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QDockWidget>
+#include <QLabel>
 #include <QMap>
 #include <QPointer>
 #include <QWidget>
+#include <QVBoxLayout>
 
 // Qt may hide/show docks while restoring layouts. That is presentation, not
 // the user's requested state. Do not feed Qt's toggleViewAction back into our
@@ -77,10 +80,16 @@ public:
         dock->setObjectName(QStringLiteral("CommandQueueDock"));
         dock->setAllowedAreas(Qt::BottomDockWidgetArea);
 
-        // Intentionally empty: no editor, queue model, or command dispatch yet.
+        // Status only: no editor, queue model, or command dispatch yet.
         auto *contents = new QWidget(dock);
         contents->setMinimumHeight(100);
         contents->setFocusPolicy(Qt::StrongFocus);
+        auto *layout = new QVBoxLayout(contents);
+        auto *status = new QLabel(tr("No active terminal"), contents);
+        status->setObjectName(QStringLiteral("CommandQueueSessionStatus"));
+        status->setWordWrap(true);
+        layout->addWidget(status);
+        layout->addStretch();
         dock->setWidget(contents);
         window->addDockWidget(Qt::BottomDockWidgetArea, dock);
         dock->hide();
@@ -122,25 +131,89 @@ public:
             rememberLayout();
             restoreTerminalFocus();
         });
-        m_actions.insert(window, toggle);
-        connect(window, &QObject::destroyed, this, [this, window] { m_actions.remove(window); });
+        WindowState state;
+        state.action = toggle;
+        state.contents = contents;
+        state.status = status;
+        m_windows.insert(window, state);
+        connect(window, &QObject::destroyed, this, [this, window] {
+            disconnect(m_windows.value(window).changedConnection);
+            m_windows.remove(window);
+        });
+        activeViewChanged(window->viewManager()->activeViewController(), window);
     }
 
-    void activeViewChanged(Konsole::SessionController *, Konsole::MainWindow *) override
+    void activeViewChanged(Konsole::SessionController *controller, Konsole::MainWindow *window) override
     {
-        // There is no session-specific behavior in this first stage.
+        auto it = m_windows.find(window);
+        if (it == m_windows.end()) {
+            return;
+        }
+        auto session = controller ? controller->session() : QPointer<Konsole::Session>();
+        SessionTracker *tracker = session ? observe(session) : nullptr;
+        if (it->tracker == tracker) {
+            refreshStatus(window);
+            return;
+        }
+        disconnect(it->changedConnection);
+        it->tracker = tracker;
+        if (tracker) {
+            it->changedConnection = connect(tracker, &SessionTracker::changed, it->contents, [this, window] {
+                refreshStatus(window);
+            });
+        }
+        refreshStatus(window);
     }
 
     QList<QAction *> menuBarActions(Konsole::MainWindow *window) const override
     {
-        if (auto *action = m_actions.value(window).data()) {
+        if (auto *action = m_windows.value(window).action.data()) {
             return {action};
         }
         return {};
     }
 
 private:
-    QMap<Konsole::MainWindow *, QPointer<QAction>> m_actions;
+    struct WindowState {
+        QPointer<QAction> action;
+        QPointer<QWidget> contents;
+        QPointer<QLabel> status;
+        QPointer<SessionTracker> tracker;
+        QMetaObject::Connection changedConnection;
+    };
+
+    SessionTracker *observe(Konsole::Session *session)
+    {
+        if (auto tracker = m_sessions.value(session)) {
+            return tracker;
+        }
+        auto *tracker = new SessionTracker(session, this);
+        tracker->setObjectName(QStringLiteral("CommandQueueSessionTracker_%1").arg(tracker->sessionId()));
+        m_sessions.insert(session, tracker);
+        connect(session, &QObject::destroyed, this, [this, session, tracker] {
+            m_sessions.remove(session);
+            tracker->deleteLater();
+        });
+        return tracker;
+    }
+
+    void refreshStatus(Konsole::MainWindow *window)
+    {
+        auto it = m_windows.find(window);
+        if (it == m_windows.end() || !it->contents || !it->status) {
+            return;
+        }
+        const auto tracker = it->tracker;
+        it->contents->setProperty("focusedSessionId", tracker ? tracker->sessionId() : -1);
+        it->contents->setProperty("readinessState", tracker ? tracker->stateName() : QStringLiteral("no-session"));
+        it->status->setText(tracker
+            ? tr("Session %1 — %2").arg(tracker->sessionId()).arg(tracker->description())
+            : tr("No active terminal"));
+        // Updating status must not alter requested visibility or keyboard focus.
+    }
+
+    QMap<Konsole::MainWindow *, WindowState> m_windows;
+    QMap<Konsole::Session *, QPointer<SessionTracker>> m_sessions;
 };
 
 K_PLUGIN_CLASS_WITH_JSON(CommandQueuePlugin, "commandqueue.json")

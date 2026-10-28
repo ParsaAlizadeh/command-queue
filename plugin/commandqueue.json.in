@@ -2,7 +2,7 @@
     "KPlugin": {
         "Id": "konsole_commandqueue",
         "Name": "Command Queue",
-        "Description": "An on-demand command queue panel (toggle-only prototype)",
+        "Description": "An on-demand panel with terminal session and shell-readiness tracking",
         "Version": "@KONSOLE_VERSION@",
         "License": "GPL-2.0-or-later"
     }

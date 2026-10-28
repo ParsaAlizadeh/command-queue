@@ -1,9 +1,10 @@
-# Command Queue: toggle-only prototype
+# Command Queue: session/readiness foundation
 
-This stage provides only an empty bottom dock named **Command Queue**.
+This stage provides a bottom dock named **Command Queue** with session status.
 **Ctrl+Q** or **Plugins → Show Command Queue** toggles it. Closing it returns
-focus to the active terminal. There is no command editor, queue, shell hook,
-input interception, or command execution. Ctrl+Q is reserved by the action;
+focus to the active terminal. There is no command editor, queue, input
+interception, or command execution. Optional shell-reporting hooks are supplied
+but are never installed or sourced automatically. Ctrl+Q is reserved by the action;
 other terminal input retains Konsole's normal handling. The shortcut appears
 in Konsole's shortcut configuration as `Show Command Queue`.
 
@@ -16,8 +17,61 @@ than deriving state from `QDockWidget::toggleViewAction()`.
 Explicit toggles also refresh KDE's in-memory window-layout snapshot. Otherwise
 XMLGUI can restore an older dock state while switching terminals, move focus,
 and recursively rebuild menus/toolbars during a split. No Konsole source patch
-is needed. Each main window still owns a single dock; session tracking is not
-implemented.
+is needed. Each main window owns a single dock which follows its active terminal.
+
+## Session ownership and readiness
+
+`activeViewChanged()` binds the panel to the controller's `Session`. There is
+one `SessionTracker` per observed session, not per view or main window. Moving
+focus to the panel keeps the last terminal selected. Switching tabs or split
+panes changes the displayed session; background observers continue receiving
+reports, and returning to a session shows its retained state. Trackers are
+removed when their session is destroyed. Status updates neither open the panel
+nor move focus. These objects are the future home for per-session queue state;
+no queue is implemented now.
+
+The panel distinguishes unknown, prompt reported, input sent, running,
+continuation input, read-only, alternate-screen application, and closed states.
+An idle-looking terminal or finished foreground PID is not sufficient to infer
+readiness. Without shell reports, the status remains unknown.
+
+**Prompt reported is a readiness candidate, not permission to inject a command.**
+The tracker cannot inspect the Readline/ZLE editing buffer. It observes
+`Emulation::sendData` without intercepting or modifying bytes, invalidating the
+prompt report on input (including terminal replies). Prompt redisplay, input
+typed ahead during a running command, and asynchronous output still require
+an empty-buffer/dispatch handshake before automatic execution can be safe.
+No automatic dispatcher or `canDispatch` guarantee is supplied in this stage.
+Exit codes and command success are not tracked yet.
+
+### Optional shell reports
+
+In a terminal running the newly built plugin, source the matching file:
+
+```bash
+# Bash 4.4+
+source /home/parsa/project/command-queue/plugin/shell/integration.bash
+```
+
+```zsh
+# Zsh
+source /home/parsa/project/command-queue/plugin/shell/integration.zsh
+```
+
+This changes only that shell session. No startup file is edited. Re-sourcing
+does not append duplicate prompt markers. Source after prompt setup; frameworks
+that subsequently replace PS1/PS2/PS0 can remove reports, requiring re-sourcing.
+Start a fresh shell to discard the optional hooks.
+
+The hooks append zero-width primary/continuation prompt markers. Bash uses PS0
+to report command acceptance, preserving existing PS0, PROMPT_COMMAND, and DEBUG
+traps. Zsh adds a preexec hook without replacing existing hooks. The tiny v1
+protocol is `OSC 777 ; command-queue ; 1 ; EVENT BEL`, with `prompt`, `running`,
+and `continuation` events. Konsole already parses OSC 777 and exposes its events
+immediately through `osc777Received`; the plugin does not parse raw terminal
+bytes or modify Konsole. Existing OSC 133 semantic integration alone does not
+enable this custom observer. The reports are lifecycle hints, not a security
+boundary or proof of an empty editor buffer.
 
 ## Build
 
@@ -38,7 +92,11 @@ focus restoration, stale layout restoration, and splitting in both directions
 with the panel focused. It uses Konsole's real XMLGUI resources, the offscreen
 Qt platform, and project-local XDG directories. Split terminals run a temporary
 sleep process rather than user shell startup files; normal user settings are
-not changed.
+not changed. Additional tests cover independent sessions, background updates,
+partial marker sequences, input forwarding, session cleanup, and interactive
+shell hooks. Hook tests use temporary homes and bypass user startup files.
+Uninstalled shells are explicitly skipped (Zsh is currently absent on the
+development machine; Bash integration is tested).
 
 ## Private headers and libraries
 

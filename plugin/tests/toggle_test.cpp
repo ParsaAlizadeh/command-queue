@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "MainWindow.h"
+#include "Emulation.h"
 #include "ViewManager.h"
 #include "profile/Profile.h"
 #include "profile/ProfileManager.h"
 #include "pluginsystem/IKonsolePlugin.h"
+#include "session/SessionController.h"
 
+#include <KActionCollection>
 #include <KPluginFactory>
 #include <KPluginMetaData>
 #include <QDockWidget>
+#include <QLabel>
+#include <QProcess>
+#include <QSignalSpy>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTest>
 
 class ToggleTest : public QObject
@@ -146,6 +154,154 @@ private Q_SLOTS:
         QTRY_VERIFY(dock->isHidden());
         QVERIFY(!actions.first()->isChecked());
         QTRY_VERIFY(currentTerminal->hasFocus());
+    }
+
+    void focusedSessionsAndReadiness()
+    {
+        KPluginMetaData metadata;
+        for (const auto &candidate : KPluginMetaData::findPlugins(QStringLiteral("konsoleplugins"))) {
+            if (candidate.pluginId() == QStringLiteral("konsole_commandqueue")) metadata = candidate;
+        }
+        const auto result = KPluginFactory::instantiatePlugin<Konsole::IKonsolePlugin>(metadata);
+        QVERIFY2(result.plugin, qPrintable(result.errorString));
+        std::unique_ptr<Konsole::IKonsolePlugin> plugin(result.plugin);
+        Konsole::MainWindow window;
+        auto *first = window.createSession(testProfile(), QString());
+        plugin->createWidgetsForMainWindow(&window);
+        window.addPlugin(plugin.get());
+        const auto actions = plugin->menuBarActions(&window);
+        window.setPluginsActions(actions);
+        auto *dock = window.findChild<QDockWidget *>(QStringLiteral("CommandQueueDock"));
+        QVERIFY(dock);
+        auto *contents = dock->widget();
+        auto state = [contents] { return contents->property("readinessState").toString(); };
+        auto marker = [](Konsole::Session *session, const QByteArray &event) {
+            const auto bytes = QByteArray("\033]777;command-queue;1;") + event + '\a';
+            session->emulation()->receiveData(bytes.constData(), bytes.size());
+        };
+        window.show();
+        window.activateWindow();
+        first->views().first()->setFocus();
+        QTRY_COMPARE(contents->property("focusedSessionId").toInt(), first->sessionId());
+        QCOMPARE(state(), QStringLiteral("unknown"));
+        QVERIFY(dock->isHidden());
+
+        // Namespace/version validation and split terminal-protocol sequences.
+        const QByteArray unrelated("\033]777;command-queue;2;prompt\a");
+        first->emulation()->receiveData(unrelated.constData(), unrelated.size());
+        QCOMPARE(state(), QStringLiteral("unknown"));
+        const QByteArray partial("\033]777;command-queue;1;pro");
+        first->emulation()->receiveData(partial.constData(), partial.size());
+        QCOMPARE(state(), QStringLiteral("unknown"));
+        first->emulation()->receiveData("mpt\a", 4);
+        QCOMPARE(state(), QStringLiteral("prompt-reported"));
+        QSignalSpy input(first->emulation(), &Konsole::Emulation::sendData);
+        first->emulation()->sendText(QStringLiteral("x"));
+        QCOMPARE(state(), QStringLiteral("input-pending"));
+        QCOMPARE(input.size(), 1);
+        QCOMPARE(input.first().first().toByteArray(), QByteArray("x"));
+        marker(first, "running");
+        QCOMPARE(state(), QStringLiteral("running"));
+        marker(first, "continuation");
+        QCOMPARE(state(), QStringLiteral("continuation"));
+        marker(first, "prompt");
+        auto *readOnly = first->views().first()->sessionController()->actionCollection()->action(QStringLiteral("view-readonly"));
+        QVERIFY(readOnly);
+        readOnly->trigger();
+        QCOMPARE(state(), QStringLiteral("read-only"));
+        readOnly->trigger();
+        QCOMPARE(state(), QStringLiteral("prompt-reported"));
+
+        // A second tab/session has independent readiness. The panel follows
+        // focus; its open state and focus are never changed by status reports.
+        auto *second = window.createSession(testProfile(), QString());
+        second->views().first()->setFocus();
+        QTRY_COMPARE(contents->property("focusedSessionId").toInt(), second->sessionId());
+        QCOMPARE(state(), QStringLiteral("unknown"));
+        actions.first()->trigger();
+        QTRY_VERIFY(contents->hasFocus());
+        marker(second, "running");
+        QCOMPARE(state(), QStringLiteral("running"));
+        QVERIFY(contents->hasFocus());
+        QVERIFY(dock->isVisible());
+        marker(first, "continuation");
+        QCOMPARE(state(), QStringLiteral("running"));
+        first->views().first()->setFocus();
+        QTRY_COMPARE(contents->property("focusedSessionId").toInt(), first->sessionId());
+        QCOMPARE(state(), QStringLiteral("continuation"));
+        QVERIFY(dock->isVisible());
+        second->views().first()->setFocus();
+        QTRY_COMPARE(contents->property("focusedSessionId").toInt(), second->sessionId());
+        QCOMPARE(state(), QStringLiteral("running"));
+
+        // Alternate-screen transitions cannot restore an old prompt report.
+        second->emulation()->receiveData("\033[?1049h", 8);
+        QCOMPARE(state(), QStringLiteral("interactive-screen"));
+        second->emulation()->receiveData("\033[?1049l", 8);
+        QCOMPARE(state(), QStringLiteral("unknown"));
+        const QString trackerName = QStringLiteral("CommandQueueSessionTracker_%1").arg(second->sessionId());
+        second->close();
+        QTRY_VERIFY(!plugin->findChild<QObject *>(trackerName));
+        QTRY_COMPARE(contents->property("focusedSessionId").toInt(), first->sessionId());
+        QCOMPARE(state(), QStringLiteral("continuation"));
+    }
+
+    void shellHooks_data()
+    {
+        QTest::addColumn<QString>("shell");
+        QTest::newRow("bash") << QStringLiteral("bash");
+        QTest::newRow("zsh") << QStringLiteral("zsh");
+    }
+
+    void shellHooks()
+    {
+        QFETCH(QString, shell);
+        const auto executable = QStandardPaths::findExecutable(shell);
+        if (executable.isEmpty()) QSKIP("Shell is not installed");
+        QTemporaryDir home;
+        QVERIFY(home.isValid());
+        QByteArray output;
+        QProcess process;
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("HOME"), home.path());
+        environment.insert(QStringLiteral("ZDOTDIR"), home.path());
+        process.setProcessEnvironment(environment);
+        process.setProcessChannelMode(QProcess::MergedChannels);
+        process.start(executable, shell == QLatin1String("bash")
+            ? QStringList{QStringLiteral("--noprofile"), QStringLiteral("--norc"), QStringLiteral("-i")}
+            : QStringList{QStringLiteral("-f"), QStringLiteral("-i")});
+        QVERIFY(process.waitForStarted());
+        connect(&process, &QProcess::readyRead, this, [&] { output += process.readAll(); });
+        // Quoted shell path is controlled by the project, but escape apostrophes.
+        QString path = QStringLiteral(PLUGIN_SOURCE_DIR "/shell/integration.") + shell;
+        path.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+        const auto source = QStringLiteral("source '%1'").arg(path).toUtf8();
+        const QByteArray prompt("\033]777;command-queue;1;prompt\a");
+        const QByteArray running("\033]777;command-queue;1;running\a");
+        const QByteArray continuation("\033]777;command-queue;1;continuation\a");
+        process.write("PS1='CQ> '; PS2='CQ_MORE> '; PS0='CQ_OLD0'; PROMPT_COMMAND=': keep_prompt_hook'\n");
+        process.write(source + '\n');
+        QTRY_VERIFY_WITH_TIMEOUT(output.contains(prompt), 5000);
+        QVERIFY(output.contains("CQ> "));
+        output.clear();
+        process.write("printf '__CQ_BODY__\\n'\n");
+        QTRY_VERIFY_WITH_TIMEOUT(output.contains(prompt), 5000);
+        QVERIFY(output.indexOf(running) >= 0);
+        QVERIFY(output.indexOf(running) < output.indexOf("__CQ_BODY__\n"));
+        if (shell == QLatin1String("bash")) QVERIFY(output.contains("CQ_OLD0"));
+        output.clear();
+        process.write("before1=$PS1; before2=$PS2; before0=$PS0; " + source
+            + "; [[ $before1 == \"$PS1\" && $before2 == \"$PS2\" && $before0 == \"$PS0\" ]] && printf '__CQ_UNCHANGED__\\n'\n");
+        QTRY_VERIFY_WITH_TIMEOUT(output.contains(prompt), 5000);
+        QVERIFY(output.contains("__CQ_UNCHANGED__\n"));
+        output.clear();
+        process.write("if true; then\n");
+        QTRY_VERIFY_WITH_TIMEOUT(output.contains(continuation), 5000);
+        output.clear();
+        process.write(":; fi\n");
+        QTRY_VERIFY_WITH_TIMEOUT(output.contains(prompt), 5000);
+        process.write("exit\n");
+        QVERIFY(process.waitForFinished());
     }
 };
 

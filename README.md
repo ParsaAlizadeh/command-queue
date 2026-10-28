@@ -1,8 +1,9 @@
 # Command Queue for Konsole
 
-Plugin source lives in `plugin/`. The current prototype only toggles an empty
-bottom panel. See [plugin/README.md](plugin/README.md) for its architecture and
-discovery behavior.
+Plugin source lives in `plugin/`. The current prototype toggles a bottom panel
+that follows the focused terminal session and displays shell-readiness reports.
+It does not queue or execute commands yet. See [plugin/README.md](plugin/README.md)
+for optional shell hooks, architecture, and discovery behavior.
 
 ## Development
 

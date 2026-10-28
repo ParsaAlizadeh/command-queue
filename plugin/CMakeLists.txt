@@ -45,7 +45,7 @@ foreach(component konsoleapp konsoleprivate)
 endforeach()
 
 configure_file(commandqueue.json.in commandqueue.json @ONLY)
-add_library(konsole_commandqueue MODULE commandqueueplugin.cpp)
+add_library(konsole_commandqueue MODULE commandqueueplugin.cpp sessiontracker.cpp sessiontracker.h)
 target_include_directories(konsole_commandqueue PRIVATE
     "${KONSOLE_SOURCE_DIR}" "${KONSOLE_SOURCE_DIR}/src"
     "${KONSOLE_SOURCE_DIR}/src/terminalDisplay"
@@ -69,6 +69,7 @@ if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     add_executable(toggle_test tests/toggle_test.cpp)
     target_compile_definitions(toggle_test PRIVATE EXPECTED_KONSOLE_VERSION="${KONSOLE_VERSION}")
+    target_compile_definitions(toggle_test PRIVATE PLUGIN_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_include_directories(toggle_test PRIVATE
         $<TARGET_PROPERTY:konsole_commandqueue,INCLUDE_DIRECTORIES>)
     target_link_libraries(toggle_test PRIVATE
