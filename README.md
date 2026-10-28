@@ -53,7 +53,7 @@ source /usr/share/konsole-command-queue/shell/integration.bash
 ```
 
 Use `integration.zsh` for Zsh. Installation does not edit startup files or enable
-hooks automatically. No RPM/DEB generation is provided yet.
+hooks automatically.
 
 To inspect installation without modifying the system:
 
@@ -61,9 +61,9 @@ To inspect installation without modifying the system:
 DESTDIR="$PWD/build/stage" cmake --install build
 ```
 
-Only the plugin, the two shell integration files, and build information should
-appear in that staging tree. Installed modules have no development RPATH and
-resolve Konsole's versioned libraries from the system. An upstream release match
+Only the plugin, the two shell integration files, build information, and the
+license should appear in that staging tree. Installed modules have no development
+RPATH and resolve Konsole's versioned libraries from the system. An upstream release match
 cannot guarantee compatibility with distribution patches: rebuild and test for
 each target distribution. No public/stable Konsole plugin ABI is available.
 
@@ -91,13 +91,47 @@ Embedded JSON contains `CommandQueueVersion`, `KonsoleVersion`, and
 `KPlugin.Version` must contain the Konsole version because the host uses that
 field for compatibility filtering. It is not our feature version.
 
-For future packages, use a combined package version such as
-`0.1.0+konsole26.08.1`, plus a separate distribution packaging revision (RPM
-Release / Debian revision). Rebuilding unchanged plugin source for a new Konsole
-changes the Konsole suffix; changing plugin functionality changes `0.1.0`.
-Packages must also depend on the corresponding distribution Konsole package,
-including its packaging revision where needed for private ABI compatibility.
-The JSON compatibility field alone is not a package dependency constraint.
+RPM packages use a combined version such as `0.1.0+konsole26.08.1`.
+Their release, for example `1.konsole0.1.fc44`, combines our packaging revision
+(`CQ_RPM_RELEASE`, default 1) with the Konsole RPM epoch and release. A distribution
+rebuild of Konsole therefore also changes the plugin package identity, even when
+the upstream version stays the same. Plugin functionality changes still bump the
+project's own version. The compatibility metadata is separate from RPM dependencies.
+
+## RPM packages
+
+RPM generation is optional and requires `rpm`, `rpmbuild` (Fedora's `rpm-build`
+package), and an installed, RPM-managed Konsole. Only native RPM builds are
+supported; DEB generation is not configured. Normal source builds do not need
+RPM tools. Configure packaging with the system prefix:
+
+```bash
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr -DCQ_BUILD_RPM=ON
+cmake --build build --parallel 2
+ctest --test-dir build --output-on-failure
+cmake --build build --target package
+```
+
+After building, `cpack --config build/CPackConfig.cmake -G RPM` can also generate
+the package. Output is under `build/packages/`; packaging does not install it.
+The RPM contains the plugin, shell integration scripts, build information, and
+license. RPM may additionally generate standard build-ID links. Neither Konsole
+itself nor compiler caches are bundled. Shell activation remains explicit.
+
+CMake queries the **installed RPM owning the selected Konsole executable** to
+obtain its name, epoch, version, release and architecture. For example:
+`konsole(x86-64) = 0:26.08.1-1.fc44`. This exact dependency is added alongside
+RPM's automatic library requirements. `konsole --version` still selects the
+upstream checkout; packaging fails if that version differs from the installed
+RPM. CPack checks the installed package again before packaging and refuses a
+stale configuration if Konsole has changed. Reconfigure and rebuild after an
+upgrade. The generated RPM is unsigned.
+
+The exact dependency can prevent a Konsole upgrade while this plugin is
+installed. Depending on DNF's solver options, it may fail or retain the older
+Konsole package. `--allowerasing` allows dependency-related removals, including
+the plugin when needed; it may also propose removing other packages. Review the
+transaction. No automatic removal or upgrade workaround is implemented.
 
 ## Development
 
@@ -108,6 +142,7 @@ users building/installing the plugin do not need it.
 ./dev.sh dev_build
 ./dev.sh plugin_test
 ./dev.sh plugin_stage
+./dev.sh plugin_rpm
 ./dev.sh run_konsole
 ./dev.sh run_system_konsole
 ```
@@ -116,7 +151,8 @@ Development defaults to Ninja, Debug, tests enabled, `/usr` as the intended
 installation prefix, and four parallel jobs. No development function installs
 system-wide. `plugin_stage` uses `DESTDIR=build/stage`. `run_konsole` builds the
 optional `konsole_host` target and launches that private host with the plugin;
-`run_system_konsole` uses the installed host. Both use `--separate` and set
+`run_system_konsole` uses the installed host. `plugin_rpm` enables RPM packaging,
+builds the project, and invokes CPack; additional arguments go to CPack. Both use `--separate` and set
 `QT_PLUGIN_PATH` for the build-tree plugin. The binary is
 `build/plugins/konsoleplugins/konsole_commandqueue.so`.
 

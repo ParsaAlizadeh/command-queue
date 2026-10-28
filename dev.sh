@@ -15,6 +15,7 @@ plugin_configure   Configure the project and fetch matching Konsole sources
 plugin_build       Build required Konsole libraries and the plugin
 plugin_test        Run tests in isolated project-local settings
 plugin_stage       Install into build/stage for inspection (no system changes)
+plugin_rpm         Configure, build, and generate an RPM under build/packages
 dev_build          Configure and build
 run_konsole        Build/run the private host with the plugin (--separate)
 run_system_konsole Run the installed host with the build-tree plugin (--separate)
@@ -38,6 +39,10 @@ plugin_test() {
 }
 plugin_stage() {
     DESTDIR="$CQ_BUILD_DIR/stage" cmake --install "$CQ_BUILD_DIR" "$@"
+}
+plugin_rpm() {
+    plugin_configure -DCQ_BUILD_RPM=ON && plugin_build &&
+        cpack --config "$CQ_BUILD_DIR/CPackConfig.cmake" -G RPM "$@"
 }
 dev_build() {
     plugin_configure && plugin_build

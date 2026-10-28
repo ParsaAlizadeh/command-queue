@@ -1,0 +1,10 @@
+# CPack runs this before collecting files. Refuse stale/mis-targeted packages.
+if(NOT CPACK_GENERATOR STREQUAL "RPM")
+    message(FATAL_ERROR "This project configures RPM packaging only.")
+endif()
+include("@PROJECT_SOURCE_DIR@/cmake/QueryKonsoleRPM.cmake")
+cq_query_konsole_rpm("@RPM_EXECUTABLE@" "@CQ_KONSOLE_EXECUTABLE@" current)
+if(NOT current_DEPENDENCY STREQUAL "@installed_konsole_DEPENDENCY@"
+    OR NOT current_ARCH STREQUAL "@installed_konsole_ARCH@")
+    message(FATAL_ERROR "Installed Konsole changed since configure. Reconfigure and rebuild before generating the RPM. Expected @installed_konsole_DEPENDENCY@; now ${current_DEPENDENCY}.")
+endif()
