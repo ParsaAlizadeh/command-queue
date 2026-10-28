@@ -92,11 +92,14 @@ Embedded JSON contains `CommandQueueVersion`, `KonsoleVersion`, and
 field for compatibility filtering. It is not our feature version.
 
 RPM packages use a combined version such as `0.1.0+konsole26.08.1`.
-Their release, for example `1.konsole0.1.fc44`, combines our packaging revision
-(`CQ_RPM_RELEASE`, default 1) with the Konsole RPM epoch and release. A distribution
-rebuild of Konsole therefore also changes the plugin package identity, even when
-the upstream version stays the same. Plugin functionality changes still bump the
+Their release, for example `2.fc44`, contains our packaging revision
+(`CQ_RPM_RELEASE`, default 2) and the build distribution's standard RPM dist tag.
+Konsole's RPM release is not included. A `-1.fc44` to `-2.fc44` Konsole rebuild
+does not change our package identity or require rebuilding the plugin merely
+because that release number changed. Plugin functionality changes still bump the
 project's own version. The compatibility metadata is separate from RPM dependencies.
+Revision 2 sorts above the previous `1.konsole...` naming scheme. If reusing an
+older build directory, pass `-DCQ_RPM_RELEASE=2` once to update its cached revision.
 
 ## RPM packages
 
@@ -119,19 +122,29 @@ license. RPM may additionally generate standard build-ID links. Neither Konsole
 itself nor compiler caches are bundled. Shell activation remains explicit.
 
 CMake queries the **installed RPM owning the selected Konsole executable** to
-obtain its name, epoch, version, release and architecture. For example:
-`konsole(x86-64) = 0:26.08.1-1.fc44`. This exact dependency is added alongside
+obtain its name, epoch, upstream version and architecture. For example:
+`konsole(x86-64) = 0:26.08.1`. Omitting the release accepts any RPM release of
+that upstream version. This dependency is added alongside
 RPM's automatic library requirements. `konsole --version` still selects the
 upstream checkout; packaging fails if that version differs from the installed
 RPM. CPack checks the installed package again before packaging and refuses a
-stale configuration if Konsole has changed. Reconfigure and rebuild after an
-upgrade. The generated RPM is unsigned.
+stale configuration if the upstream version, epoch, package name or architecture
+has changed. A distribution release-only change is accepted. The generated RPM
+is unsigned.
 
-The exact dependency can prevent a Konsole upgrade while this plugin is
+An upstream-version change can prevent a Konsole upgrade while this plugin is
 installed. Depending on DNF's solver options, it may fail or retain the older
 Konsole package. `--allowerasing` allows dependency-related removals, including
 the plugin when needed; it may also propose removing other packages. Review the
 transaction. No automatic removal or upgrade workaround is implemented.
+
+Konsole's metadata filter compares major/minor only, while its private libraries
+are versioned with the full upstream version. Automatic RPM library requirements
+therefore also constrain upgrades; deleting just our explicit dependency would
+not remove that constraint. Accepting distribution rebuilds assumes their patches
+preserve the ABI used by the plugin, which is not guaranteed by Konsole's private
+API. DNF does not automatically rebuild the plugin on upgrades; that would need
+separate build automation or a repository publishing matching binary packages.
 
 ## Development
 
