@@ -7,6 +7,6 @@
         "Name": "Command Queue",
         "Description": "Per-session command queues in an on-demand panel",
         "Version": "@KONSOLE_VERSION@",
-        "License": "GPL-2.0-or-later"
+        "License": "MIT"
     }
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-License-Identifier: MIT
 #include "sessionqueue.h"
 #include "sessiontracker.h"
 #include "session/Session.h"

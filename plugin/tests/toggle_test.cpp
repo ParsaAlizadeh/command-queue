@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-License-Identifier: MIT
 #include "MainWindow.h"
 #include "Emulation.h"
 #include "ViewManager.h"
@@ -66,6 +66,7 @@ private Q_SLOTS:
             }
         }
         QVERIFY(metadata.isValid());
+        QCOMPARE(metadata.rawData().value(QStringLiteral("KPlugin")).toObject().value(QStringLiteral("License")).toString(), QStringLiteral("MIT"));
         QCOMPARE(metadata.version(), QStringLiteral(EXPECTED_KONSOLE_VERSION));
         QCOMPARE(metadata.rawData().value(QStringLiteral("CommandQueueVersion")).toString(), QStringLiteral(EXPECTED_PLUGIN_VERSION));
         QCOMPARE(metadata.rawData().value(QStringLiteral("KonsoleVersion")).toString(), QStringLiteral(EXPECTED_KONSOLE_VERSION));
