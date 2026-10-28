@@ -23,9 +23,12 @@ sudo dnf builddep konsole
 From the repository root:
 
 ```bash
-cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_TESTING=OFF
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr \
+  -DBUILD_TESTING=OFF -DCQ_BUILD_RPM=ON
 cmake --build build --parallel 2
-sudo cmake --install build
+cpack --config build/CPackConfig.cmake -G RPM \
+  -D CPACK_RPM_FILE_NAME=konsole-command-queue.rpm
+sudo dnf install ./build/packages/konsole-command-queue.rpm
 ```
 
 Restart Konsole after installation.
@@ -60,6 +63,15 @@ plugin after upgrading Konsole.
 
 For architecture, testing, packaging, and development commands, see
 [README_DEV.md](README_DEV.md).
+
+## Uninstall
+
+```bash
+sudo dnf remove konsole-command-queue
+```
+
+Remove any integration line you added to `~/.bashrc` or `~/.zshrc`, then restart
+Konsole.
 
 ## License
 
