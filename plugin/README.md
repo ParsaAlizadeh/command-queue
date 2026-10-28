@@ -7,9 +7,17 @@ input interception, or command execution. Ctrl+Q is reserved by the action;
 other terminal input retains Konsole's normal handling. The shortcut appears
 in Konsole's shortcut configuration as `Show Command Queue`.
 
-The dock starts hidden when created. Konsole may subsequently restore dock
-layout from its normal window settings. It can be floated using Qt's standard
-dock controls. Each Konsole main window owns its own dock and action.
+The dock starts closed. Only the plugin's shortcut/menu toggle and the dock's
+close button change its requested open/closed state. Internal Qt visibility
+notifications and layout restoration do not toggle that state or cause the
+plugin to move keyboard focus. The plugin uses its own checkable action rather
+than deriving state from `QDockWidget::toggleViewAction()`.
+
+Explicit toggles also refresh KDE's in-memory window-layout snapshot. Otherwise
+XMLGUI can restore an older dock state while switching terminals, move focus,
+and recursively rebuild menus/toolbars during a split. No Konsole source patch
+is needed. Each main window still owns a single dock; session tracking is not
+implemented.
 
 ## Build
 
@@ -26,8 +34,11 @@ source tree or rebuild Konsole. The Konsole libraries must already be built.
 The test loads the compiled module through KDE's factory mechanism and uses
 the real Konsole main window and terminal widget. It checks discovery,
 metadata, shortcut toggling, menu action state, close-button handling, and
-focus restoration. It uses the offscreen Qt platform and project-local XDG
-directories, without launching a shell or changing normal user settings.
+focus restoration, stale layout restoration, and splitting in both directions
+with the panel focused. It uses Konsole's real XMLGUI resources, the offscreen
+Qt platform, and project-local XDG directories. Split terminals run a temporary
+sleep process rather than user shell startup files; normal user settings are
+not changed.
 
 ## Private headers and libraries
 
