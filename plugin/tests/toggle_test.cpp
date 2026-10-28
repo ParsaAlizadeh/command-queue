@@ -11,6 +11,7 @@
 #include <KPluginFactory>
 #include <KPluginMetaData>
 #include <QDockWidget>
+#include <QJsonObject>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
@@ -66,6 +67,9 @@ private Q_SLOTS:
         }
         QVERIFY(metadata.isValid());
         QCOMPARE(metadata.version(), QStringLiteral(EXPECTED_KONSOLE_VERSION));
+        QCOMPARE(metadata.rawData().value(QStringLiteral("CommandQueueVersion")).toString(), QStringLiteral(EXPECTED_PLUGIN_VERSION));
+        QCOMPARE(metadata.rawData().value(QStringLiteral("KonsoleVersion")).toString(), QStringLiteral(EXPECTED_KONSOLE_VERSION));
+        QCOMPARE(metadata.rawData().value(QStringLiteral("KonsoleRevision")).toString().size(), 40);
         const auto result = KPluginFactory::instantiatePlugin<Konsole::IKonsolePlugin>(metadata);
         QVERIFY2(result.plugin, qPrintable(result.errorString));
         std::unique_ptr<Konsole::IKonsolePlugin> plugin(result.plugin);

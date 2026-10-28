@@ -15,7 +15,7 @@ and edit state when switching terminals. Queues are in memory and discarded
 when their session closes. There is no success condition yet.
 
 Optional shell hooks below must be sourced in each shell before automatic
-execution works. They are never installed or sourced automatically. Closing the
+execution works. Installation ships the scripts but never sources them automatically. Closing the
 panel returns focus to the active terminal. Ctrl+Q is reserved by the action;
 other terminal input retains Konsole's normal handling. The shortcut appears
 in Konsole's shortcut configuration as `Show Command Queue`.
@@ -83,98 +83,23 @@ bytes or modify Konsole. Existing OSC 133 semantic integration alone does not
 enable this custom observer. The reports are lifecycle hints, not a security
 boundary or proof of an empty editor buffer.
 
-## Build
+## Build, installation, and compatibility
 
-From `/home/parsa/project/command-queue`:
+See the [project README](../README.md) for the standard CMake workflow,
+dependencies, compiler cache policy, installation paths, and versioning.
+The root CMake project fetches and builds the matching Konsole dependency;
+`plugin/` contains the plugin sources and is no longer a standalone CMake project.
 
-```bash
-./dev.sh plugin_configure
-./dev.sh plugin_build
-./dev.sh plugin_test
-```
+There is no public `find_package(Konsole)` SDK. The plugin includes original
+private headers from the fetched checkout and generated headers from its
+isolated build. It links to that build's `konsoleapp` and `konsoleprivate` while
+developing. Installation removes the development RPATH so the installed module
+uses the system's matching versioned libraries. Konsole is not installed by us.
 
-This configures a separate project; it does not add the plugin to Konsole's
-source tree or rebuild Konsole. The Konsole libraries must already be built.
-The test loads the compiled module through KDE's factory mechanism and uses
-the real Konsole main window and terminal widget. It checks discovery,
-metadata, shortcut toggling, menu action state, close-button handling, and
-focus restoration, stale layout restoration, and splitting in both directions
-with the panel focused. It uses Konsole's real XMLGUI resources, the offscreen
-Qt platform, and project-local XDG directories. Split terminals run a temporary
-sleep process rather than user shell startup files; normal user settings are
-not changed. Additional tests cover independent sessions, background updates,
-partial marker sequences, input forwarding, session cleanup, and interactive
-shell hooks. Hook tests use temporary homes and bypass user startup files.
-An end-to-end test uses real Bash sessions to check ordered background execution,
-shell variable persistence, independent queues/drafts, editing, and deletion.
-Uninstalled shells are explicitly skipped (Zsh is currently absent on the
-development machine; Bash integration is tested).
-
-## Private headers and libraries
-
-There is no `find_package(Konsole)` plugin SDK. Instead CMake uses two explicit
-cache paths (the defaults are the sibling directories shown above):
-
-* `KONSOLE_SOURCE_DIR`: original headers, such as `src/MainWindow.h` and
-  `src/pluginsystem/IKonsolePlugin.h`.
-* `KONSOLE_BINARY_DIR`: generated headers, such as `src/config-konsole.h`,
-  `src/konsoleapp_export.h`, and `src/konsoleprivate_export.h`, and the compiled
-  libraries in `bin/`.
-
-The configure step reads the host build's `CMakeCache.txt`, checks that its
-source directory matches, and reads `CMAKE_PROJECT_VERSION`. That version is
-embedded in the plugin metadata. This is the host compatibility version, not
-the plugin project's own feature version.
-
-`find_library(... NO_DEFAULT_PATH)` locates only the libraries in the supplied
-Konsole build, then imported CMake targets link the module to `konsoleapp` and
-`konsoleprivate`. Normal `find_package` calls locate Fedora's Qt6 and KDE
-Frameworks dependencies. The development module has a build RPATH pointing
-at the private library directory; it is not a relocatable release package.
-
-## Output and discovery
-
-The build produces:
-
-```text
-build/plugin/plugins/konsoleplugins/konsole_commandqueue.so
-```
-
-This is a Qt/KDE shared plugin module, not an executable. Its JSON metadata
-is embedded by Qt's meta-object compiler; no separate JSON installation is
-needed. Point `QT_PLUGIN_PATH` at the directory **containing** `konsoleplugins`,
-not at that subdirectory itself.
-
-Launch a fresh private Konsole process from the project root:
-
-```bash
-./dev.sh run_konsole
-```
-
-`--separate` avoids forwarding the request to an already-running Konsole,
-which would not inherit this environment. The second search directory also
-exposes the private build's existing plugins. No installation is necessary.
-
-Konsole's `PluginManager` calls `KPluginMetaData::findPlugins("konsoleplugins")`.
-It filters metadata by the first five version characters (`26.08` here),
-instantiates accepted plugins, and asks them to create widgets and Plugins
-menu actions for each main window. There is no separate enable/disable
-checkbox: discovery loads the plugin; the menu action shows/hides its dock.
-Restart Konsole after rebuilding to load the new binary.
-
-The same discovery method can be tried with Fedora's Konsole, currently also
-26.08.1:
-
-```bash
-./dev.sh run_system_konsole
-```
-
-The automated test targets the private build, not Fedora's process. Matching
-version metadata alone does not prove binary compatibility with downstream
-patches. An updated repository Konsole may reject this module or have different
-private-library dependencies; rebuild against a matching source/build before
-using it there. Publishing/installing a relocatable plugin is a later stage.
-
-Nothing is copied into `/usr`, `~/.local`, or Fedora's Qt plugin directories.
-This prototype intentionally has no plugin installation rule. CMake's generic
-KDE installation-prefix message does not mean an installation was performed.
+Konsole discovers `konsoleplugins/konsole_commandqueue.so` through Qt's plugin
+search paths and loads it automatically. There is no separate enable checkbox;
+the Plugins menu action controls panel visibility. Konsole compares the first
+five characters of `KPlugin.Version` with its release version. Our build targets
+the full release and separately embeds the plugin's own version and dependency
+commit. Matching metadata is not proof of compatibility with downstream patches.
+Restart Konsole after rebuilding or installing to load the new module.

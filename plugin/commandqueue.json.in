@@ -1,8 +1,11 @@
 {
+    "CommandQueueVersion": "@PROJECT_VERSION@",
+    "KonsoleVersion": "@KONSOLE_VERSION@",
+    "KonsoleRevision": "@KONSOLE_REVISION@",
     "KPlugin": {
         "Id": "konsole_commandqueue",
         "Name": "Command Queue",
-        "Description": "An on-demand panel with terminal session and shell-readiness tracking",
+        "Description": "Per-session command queues in an on-demand panel",
         "Version": "@KONSOLE_VERSION@",
         "License": "GPL-2.0-or-later"
     }
