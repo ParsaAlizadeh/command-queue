@@ -114,7 +114,9 @@ During configuration, CMake:
    It does not execute `konsole --version` or select a repository's newest build.
 2. Finds the installed versioned `libkonsoleapp` and `libkonsoleprivate` libraries
    and verifies that their source RPM and architecture match Konsole's.
-3. Downloads that exact SRPM through `dnf download --srpm`, unless already cached.
+3. Downloads that exact SRPM through `dnf download --srpm`, unless already cached,
+   using only `fedora-source` and `updates-source`. If the command fails or
+   produces no expected file, it clears project DNF metadata and retries once.
    It checks the cached RPM's identity and payload digests.
 4. Extracts the spec and source files. Fedora's `%prep` applies its patches.
    Fedora's `%cmake_kf6` generates the real configuration and export headers;
@@ -131,10 +133,12 @@ configure flag list. This follows the source and recipe; it does not recreate
 the historical Fedora buildroot, compiler or RPM macro versions exactly.
 
 The first configuration needs network access and the exact source package in
-enabled repositories. Missing or mismatched source packages cause a failure;
+`fedora-source` or `updates-source` (enabled for this command only). Missing or
+mismatched source packages cause a failure;
 there is no fallback to another release or upstream Git checkout. DNF runs
 noninteractively, without sudo or importing keys on the user's behalf. Repository
-configuration and trusted keys must already be usable.
+configuration and trusted keys for those Fedora repositories must already be
+usable. Unrelated repositories are excluded, including their key-import prompts.
 
 Source RPMs, extracted files, prepared sources, headers and logs live under:
 
@@ -143,8 +147,9 @@ build/_deps/konsole-26.08.1-1.fc44.x86_64/
 ```
 
 The exact directory follows the installed source package and architecture.
-`download.log` and `configure.log` contain detailed failure diagnostics. DNF's
-cache, state and logs live under `build/dnf/`. Repeat configurations reuse the
+`download.log` records each download attempt and any metadata cleanup, including
+exit statuses and command output; `configure.log` records header preparation.
+DNF's cache, state and logs live under `build/dnf/`. Repeat configurations reuse the
 cached SRPM and prepared source, then rerun Fedora's configure invocation without
 reapplying patches. After upgrading Konsole, rerun configure, build and install;
 a different SRPM gets its own directory. Unused old dependency directories can

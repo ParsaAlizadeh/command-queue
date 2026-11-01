@@ -35,21 +35,8 @@ endforeach()
 string(REGEX REPLACE "\\.src\\.rpm$" "" source_nvr "${KONSOLE_SOURCE_RPM}")
 set(work "${CMAKE_BINARY_DIR}/_deps/${source_nvr}.${installed_konsole_ARCH}")
 set(archive "${work}/${KONSOLE_SOURCE_RPM}")
-file(MAKE_DIRECTORY "${work}")
-if(NOT EXISTS "${archive}")
-    message(STATUS "Downloading installed Konsole source: ${KONSOLE_SOURCE_RPM}")
-    execute_process(COMMAND "${DNF_EXECUTABLE}" --assumeno
-        "--setopt=cachedir=${CMAKE_BINARY_DIR}/dnf/cache"
-        "--setopt=persistdir=${CMAKE_BINARY_DIR}/dnf/state"
-        "--setopt=logdir=${CMAKE_BINARY_DIR}/dnf/log"
-        download --srpm "--destdir=${work}" "${installed_konsole_NEVRA}"
-        RESULT_VARIABLE result OUTPUT_VARIABLE download_log ERROR_VARIABLE download_error)
-    file(WRITE "${work}/download.log" "${download_log}\n${download_error}")
-    if(NOT result EQUAL 0 OR NOT EXISTS "${archive}")
-        file(REMOVE "${archive}")
-        message(FATAL_ERROR "Cannot download ${KONSOLE_SOURCE_RPM}. See ${work}/download.log. The exact installed source package must be available in enabled repositories.")
-    endif()
-endif()
+include("${CMAKE_CURRENT_LIST_DIR}/DownloadKonsoleSource.cmake")
+cq_download_konsole_source("${DNF_EXECUTABLE}" "${KONSOLE_SOURCE_RPM}" "${work}")
 execute_process(COMMAND "${RPM_EXECUTABLE}" --checksig --nosignature "${archive}"
     RESULT_VARIABLE result OUTPUT_VARIABLE digest_log ERROR_VARIABLE digest_error)
 if(NOT result EQUAL 0)

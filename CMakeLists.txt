@@ -47,6 +47,9 @@ include(CTest)
 include(cmake/Konsole.cmake)
 add_subdirectory(plugin)
 if(BUILD_TESTING)
+    add_test(NAME fedora_source_download COMMAND "${CMAKE_COMMAND}"
+        "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/download-tests"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestKonsoleSourceDownload.cmake")
     add_test(NAME fedora_recipe COMMAND "${CMAKE_COMMAND}"
         "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/recipe-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TestKonsoleSpec.cmake")
